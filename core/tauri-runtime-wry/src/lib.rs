@@ -2829,6 +2829,7 @@ fn create_webview<T: UserEvent, F: Fn(RawWindow) + Send + 'static>(
     .with_url(&url)
     .unwrap() // safe to unwrap because we validate the URL beforehand
     .with_transparent(is_window_transparent)
+    .with_background_color((255,255,255, 255))
     .with_accept_first_mouse(webview_attributes.accept_first_mouse);
 
   if webview_attributes.file_drop_handler_enabled {

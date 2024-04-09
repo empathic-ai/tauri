@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -23,6 +23,8 @@ declare global {
       metadata: {
         windows: WindowDef[]
         currentWindow: WindowDef
+        webviews: WebviewDef[]
+        currentWebview: WebviewDef
       }
       plugins: {
         path: {
@@ -32,6 +34,12 @@ declare global {
       }
     }
   }
+}
+
+/** @ignore */
+interface WebviewDef {
+  windowLabel: string
+  label: string
 }
 
 /** @ignore */

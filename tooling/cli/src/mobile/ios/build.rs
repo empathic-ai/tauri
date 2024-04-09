@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -11,11 +11,11 @@ use crate::{
   helpers::{
     app_paths::tauri_dir,
     config::{get as get_tauri_config, ConfigHandle},
-    flock, resolve_merge_config,
+    flock,
   },
-  interface::{AppSettings, Interface, Options as InterfaceOptions},
+  interface::{AppInterface, AppSettings, Interface, Options as InterfaceOptions},
   mobile::{write_options, CliOptions},
-  Result,
+  ConfigValue, Result,
 };
 use clap::{ArgAction, Parser};
 
@@ -32,7 +32,7 @@ use std::{env::set_current_dir, fs};
 #[derive(Debug, Clone, Parser)]
 #[clap(
   about = "Build your app in release mode for iOS and generate IPAs",
-  long_about = "Build your app in release mode for iOS and generate IPAs. It makes use of the `build.distDir` property from your `tauri.conf.json` file. It also runs your `build.beforeBuildCommand` which usually builds your frontend into `build.distDir`."
+  long_about = "Build your app in release mode for iOS and generate IPAs. It makes use of the `build.frontendDist` property from your `tauri.conf.json` file. It also runs your `build.beforeBuildCommand` which usually builds your frontend into `build.frontendDist`."
 )]
 pub struct Options {
   /// Builds with the debug flag
@@ -53,13 +53,16 @@ pub struct Options {
   pub features: Option<Vec<String>>,
   /// JSON string or path to JSON file to merge with tauri.conf.json
   #[clap(short, long)]
-  pub config: Option<String>,
+  pub config: Option<ConfigValue>,
   /// Build number to append to the app version.
   #[clap(long)]
   pub build_number: Option<u32>,
   /// Open Xcode
   #[clap(short, long)]
   pub open: bool,
+  /// Skip prompting for values
+  #[clap(long, env = "CI")]
+  pub ci: bool,
 }
 
 impl From<Options> for BuildOptions {
@@ -70,27 +73,43 @@ impl From<Options> for BuildOptions {
       target: None,
       features: options.features,
       bundles: None,
+      no_bundle: false,
       config: options.config,
       args: Vec::new(),
-      ci: false,
+      ci: options.ci,
     }
   }
 }
 
-pub fn command(mut options: Options, noise_level: NoiseLevel) -> Result<()> {
-  let (merge_config, _merge_config_path) = resolve_merge_config(&options.config)?;
-  options.config = merge_config;
+pub fn command(options: Options, noise_level: NoiseLevel) -> Result<()> {
+  let mut build_options: BuildOptions = options.clone().into();
+  build_options.target = Some(
+    Target::all()
+      .get(Target::DEFAULT_KEY)
+      .unwrap()
+      .triple
+      .into(),
+  );
 
   let tauri_config = get_tauri_config(
     tauri_utils::platform::Target::Ios,
-    options.config.as_deref(),
+    options.config.as_ref().map(|c| &c.0),
   )?;
-  let (app, config) = {
+  let (interface, app, config) = {
     let tauri_config_guard = tauri_config.lock().unwrap();
     let tauri_config_ = tauri_config_guard.as_ref().unwrap();
-    let app = get_app(tauri_config_);
-    let (config, _metadata) = get_config(&app, tauri_config_, &Default::default());
-    (app, config)
+
+    let interface = AppInterface::new(tauri_config_, build_options.target.clone())?;
+    interface.build_options(&mut Vec::new(), &mut build_options.features, true);
+
+    let app = get_app(tauri_config_, &interface);
+    let (config, _metadata) = get_config(
+      &app,
+      tauri_config_,
+      build_options.features.as_ref(),
+      &Default::default(),
+    );
+    (interface, app, config)
   };
 
   let tauri_path = tauri_dir();
@@ -115,7 +134,15 @@ pub fn command(mut options: Options, noise_level: NoiseLevel) -> Result<()> {
   configure_cargo(&app, None)?;
 
   let open = options.open;
-  let _handle = run_build(options, tauri_config, &config, &mut env, noise_level)?;
+  let _handle = run_build(
+    interface,
+    options,
+    build_options,
+    tauri_config,
+    &config,
+    &mut env,
+    noise_level,
+  )?;
 
   if open {
     open_and_wait(&config, &env);
@@ -125,7 +152,9 @@ pub fn command(mut options: Options, noise_level: NoiseLevel) -> Result<()> {
 }
 
 fn run_build(
-  mut options: Options,
+  interface: AppInterface,
+  options: Options,
+  mut build_options: BuildOptions,
   tauri_config: ConfigHandle,
   config: &AppleConfig,
   env: &mut Env,
@@ -137,16 +166,7 @@ fn run_build(
     Profile::Release
   };
 
-  let mut build_options: BuildOptions = options.clone().into();
-  build_options.target = Some(
-    Target::all()
-      .get(Target::DEFAULT_KEY)
-      .unwrap()
-      .triple
-      .into(),
-  );
-  let interface =
-    crate::build::setup(tauri_utils::platform::Target::Ios, &mut build_options, true)?;
+  crate::build::setup(&interface, &mut build_options, tauri_config.clone(), true)?;
 
   let app_settings = interface.app_settings();
   let bin_path = app_settings.app_binary_path(&InterfaceOptions {
@@ -164,21 +184,9 @@ fn run_build(
     vars: Default::default(),
   };
   let handle = write_options(
-    &tauri_config
-      .lock()
-      .unwrap()
-      .as_ref()
-      .unwrap()
-      .tauri
-      .bundle
-      .identifier,
+    &tauri_config.lock().unwrap().as_ref().unwrap().identifier,
     cli_options,
   )?;
-
-  options
-    .features
-    .get_or_insert(Vec::new())
-    .push("custom-protocol".into());
 
   let mut out_files = Vec::new();
 

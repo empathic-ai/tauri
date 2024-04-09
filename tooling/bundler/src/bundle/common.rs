@@ -1,9 +1,7 @@
 // Copyright 2016-2019 Cargo-Bundle developers <https://github.com/burtonageo/cargo-bundle>
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
-
-use log::debug;
 
 use std::{
   ffi::OsStr,
@@ -103,9 +101,7 @@ pub fn copy_dir(from: &Path, to: &Path) -> crate::Result<()> {
     )));
   }
   if to.exists() {
-    return Err(crate::Error::GenericError(format!(
-      "{from:?} already exists"
-    )));
+    return Err(crate::Error::GenericError(format!("{to:?} already exists")));
   }
   let parent = to.parent().expect("No data in parent");
   fs::create_dir_all(parent)?;
@@ -130,6 +126,39 @@ pub fn copy_dir(from: &Path, to: &Path) -> crate::Result<()> {
   Ok(())
 }
 
+/// Copies user-defined files specified in the configuration file to the package.
+///
+/// The configuration object maps the path in the package to the path of the file on the filesystem,
+/// relative to the tauri.conf.json file.
+///
+/// Expects a HashMap of PathBuf entries, representing destination and source paths,
+/// and also a path of a directory. The files will be stored with respect to this directory.
+#[cfg(any(
+  target_os = "linux",
+  target_os = "dragonfly",
+  target_os = "freebsd",
+  target_os = "netbsd",
+  target_os = "openbsd"
+))]
+pub fn copy_custom_files(
+  files_map: &std::collections::HashMap<std::path::PathBuf, std::path::PathBuf>,
+  data_dir: &Path,
+) -> crate::Result<()> {
+  for (pkg_path, path) in files_map.iter() {
+    let pkg_path = if pkg_path.is_absolute() {
+      pkg_path.strip_prefix("/").unwrap()
+    } else {
+      pkg_path
+    };
+    if path.is_file() {
+      copy_file(path, data_dir.join(pkg_path))?;
+    } else {
+      copy_dir(path, &data_dir.join(pkg_path))?;
+    }
+  }
+  Ok(())
+}
+
 pub trait CommandExt {
   // The `pipe` function sets the stdout and stderr to properly
   // show the command output in the Node.js wrapper.
@@ -142,14 +171,14 @@ impl CommandExt for Command {
     self.stdout(os_pipe::dup_stdout()?);
     self.stderr(os_pipe::dup_stderr()?);
     let program = self.get_program().to_string_lossy().into_owned();
-    debug!(action = "Running"; "Command `{} {}`", program, self.get_args().map(|arg| arg.to_string_lossy()).fold(String::new(), |acc, arg| format!("{acc} {arg}")));
+    log::debug!(action = "Running"; "Command `{} {}`", program, self.get_args().map(|arg| arg.to_string_lossy()).fold(String::new(), |acc, arg| format!("{acc} {arg}")));
 
     self.status().map_err(Into::into)
   }
 
   fn output_ok(&mut self) -> crate::Result<Output> {
     let program = self.get_program().to_string_lossy().into_owned();
-    debug!(action = "Running"; "Command `{} {}`", program, self.get_args().map(|arg| arg.to_string_lossy()).fold(String::new(), |acc, arg| format!("{acc} {arg}")));
+    log::debug!(action = "Running"; "Command `{} {}`", program, self.get_args().map(|arg| arg.to_string_lossy()).fold(String::new(), |acc, arg| format!("{acc} {arg}")));
 
     self.stdout(Stdio::piped());
     self.stderr(Stdio::piped());
@@ -167,7 +196,7 @@ impl CommandExt for Command {
         match stdout.read_line(&mut line) {
           Ok(0) => break,
           Ok(_) => {
-            debug!(action = "stdout"; "{}", line.trim_end());
+            log::debug!(action = "stdout"; "{}", line.trim_end());
             lines.extend(line.as_bytes().to_vec());
           }
           Err(_) => (),
@@ -186,7 +215,7 @@ impl CommandExt for Command {
         match stderr.read_line(&mut line) {
           Ok(0) => break,
           Ok(_) => {
-            debug!(action = "stderr"; "{}", line.trim_end());
+            log::debug!(action = "stderr"; "{}", line.trim_end());
             lines.extend(line.as_bytes().to_vec());
           }
           Err(_) => (),

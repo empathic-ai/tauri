@@ -1,4 +1,4 @@
-# Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+# Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-License-Identifier: MIT
 
@@ -64,6 +64,18 @@ jobs:
           ndk-version: r25b
           local-cache: true
 
+      # TODO check after https://github.com/nttld/setup-ndk/issues/518 is fixed
+      - name: Restore Android Symlinks
+        if: matrix.platform == 'ubuntu-latest' || matrix.platform == 'macos-latest'
+        run: |
+          directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          find "$directory" -type l | while read link; do
+              current_target=$(readlink "$link")
+              new_target="$directory/$(basename "$current_target")"
+              ln -sf "$new_target" "$link"
+              echo "Changed $(basename "$link") from $current_target to $new_target"
+          done
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -72,6 +84,14 @@ jobs:
 
       - name: build CLI
         run: cargo build --manifest-path ./tooling/cli/Cargo.toml
+      
+      - name: move CLI to cargo bin dir
+        if: matrix.os != "windows-latest"
+        run: mv ./tooling/cli/target/debug/cargo-tauri $HOME/.cargo/bin
+          
+      - name: move CLI to cargo bin dir
+        if: matrix.os == "windows-latest"
+        run: mv ./tooling/cli/target/debug/cargo-tauri.exe $HOME/.cargo/bin
 
       - name: build Tauri API
         working-directory: ./tooling/api
@@ -83,12 +103,12 @@ jobs:
 
       - name: init Android Studio project
         working-directory: ./examples/api
-        run: ../../tooling/cli/target/debug/cargo-tauri android init
+        run: cargo tauri android init
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: build APK
         working-directory: ./examples/api
-        run: ../../tooling/cli/target/debug/cargo-tauri android build
+        run: cargo tauri android build
         env:
           NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}

@@ -1,5 +1,230 @@
 # Changelog
 
+## \[2.0.0-beta.12]
+
+### New Features
+
+- [`93e0e1392`](https://www.github.com/tauri-apps/tauri/commit/93e0e1392ec341fcadf696c03e78f0ca1e73c941) Support specifying a version for `tauri add` subcommand, for example: `tauri add window-state@2.0.0-beta.2`
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.12`
+
+## \[2.0.0-beta.11]
+
+### Enhancements
+
+- [`ac76a22f3`](https://www.github.com/tauri-apps/tauri/commit/ac76a22f383028d9bacdedebeb41d3fca5ec9dac)([#9183](https://www.github.com/tauri-apps/tauri/pull/9183)) Allow empty responses for `devUrl`, `beforeDevCommand` and `beforeBuildCommands` questions in `tauri init`.
+- [`b525ddadf`](https://www.github.com/tauri-apps/tauri/commit/b525ddadf7e7588c3e195cf0f821c9862c545d06)([#9237](https://www.github.com/tauri-apps/tauri/pull/9237)) `openssl` is no longer a required dependency on macOS.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.11`
+
+## \[2.0.0-beta.10]
+
+### New Features
+
+- [`7213b9e47`](https://www.github.com/tauri-apps/tauri/commit/7213b9e47242bef814aa7257e0bf84631bf5fe7e)([#9124](https://www.github.com/tauri-apps/tauri/pull/9124)) Add default permission for a plugin to capabilities when using `tauri add <plugin>`.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.10`
+
+## \[2.0.0-beta.9]
+
+### Bug Fixes
+
+- [`c3ea3a2b7`](https://www.github.com/tauri-apps/tauri/commit/c3ea3a2b7d2fe3085f05b63dd1feb962beb4b7b3)([#9126](https://www.github.com/tauri-apps/tauri/pull/9126)) Fix bundling when `plugins > updater > windows > installerArgs` are set in `tauri.conf.json`
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.9`
+
+## \[2.0.0-beta.8]
+
+### Enhancements
+
+- [`3e472d0af`](https://www.github.com/tauri-apps/tauri/commit/3e472d0afcd67545dd6d9f18d304580a3b2759a8)([#9115](https://www.github.com/tauri-apps/tauri/pull/9115)) Changed the permission and capability platforms to be optional.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.8`
+
+## \[2.0.0-beta.7]
+
+### Enhancements
+
+- [`c68218b36`](https://www.github.com/tauri-apps/tauri/commit/c68218b362c417b62e56c7a2b5b32c13fe035a83)([#8990](https://www.github.com/tauri-apps/tauri/pull/8990)) Add `--no-bundle` flag for `tauri build` command to skip bundling. Previously `none` was used to skip bundling, it will now be treated as invalid format and a warning will be emitted instead.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.7`
+
+## \[2.0.0-beta.6]
+
+### Bug Fixes
+
+- [`f5f3ed5f`](https://www.github.com/tauri-apps/tauri/commit/f5f3ed5f6faa0b51e83244acc15e9006299a03ba)([#9009](https://www.github.com/tauri-apps/tauri/pull/9009)) Fixes Android and iOS project initialization when the Tauri CLI is on a different disk partition.
+- [`d7d03c71`](https://www.github.com/tauri-apps/tauri/commit/d7d03c7197212f3a5bebe08c929417d60927eb89)([#9017](https://www.github.com/tauri-apps/tauri/pull/9017)) Fixes dev watcher on mobile dev.
+- [`b658ded6`](https://www.github.com/tauri-apps/tauri/commit/b658ded614cfc169228cb22ad5bfc64478dfe161)([#9015](https://www.github.com/tauri-apps/tauri/pull/9015)) Fixes truncation of existing BuildTask.kt when running `tauri android init`.
+
+### What's Changed
+
+- [`3657ad82`](https://www.github.com/tauri-apps/tauri/commit/3657ad82f88ce528551d032d521c52eed3f396b4)([#9008](https://www.github.com/tauri-apps/tauri/pull/9008)) Updates to new ACL manifest path.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.6`
+
+## \[2.0.0-beta.5]
+
+### New Features
+
+- [`06d63d67`](https://www.github.com/tauri-apps/tauri/commit/06d63d67a061459dd533ddcae755922427a6dfc5)([#8827](https://www.github.com/tauri-apps/tauri/pull/8827)) Add new subcommands for managing permissions and cababilities:
+
+  - `tauri permission new`
+  - `tauri permission add`
+  - `tauri permission rm`
+  - `tauri permission ls`
+  - `tauri capability new`
+
+### Breaking Changes
+
+- [`b9e6a018`](https://www.github.com/tauri-apps/tauri/commit/b9e6a01879d9233040f3d3fab11c59e70563da7e)([#8937](https://www.github.com/tauri-apps/tauri/pull/8937)) The `custom-protocol` Cargo feature is no longer required on your application and is now ignored. To check if running on production, use `#[cfg(not(dev))]` instead of `#[cfg(feature = "custom-protocol")]`.
+
+### Enhancements
+
+- [`9be314f0`](https://www.github.com/tauri-apps/tauri/commit/9be314f07a4ca5d14433d41919492f3e91b5536a)([#8951](https://www.github.com/tauri-apps/tauri/pull/8951)) Add plugins to `Cargo.toml` when using `tauri migrate`
+
+### Bug Fixes
+
+- [`cbd9755e`](https://www.github.com/tauri-apps/tauri/commit/cbd9755e0926a7e47e59deb50f4bb93d621791a5)([#8977](https://www.github.com/tauri-apps/tauri/pull/8977)) Fixes process logs not showing on `ios dev`.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.5`
+
+## \[2.0.0-beta.4]
+
+### Bug Fixes
+
+- [`e538ba58`](https://www.github.com/tauri-apps/tauri/commit/e538ba586c5b8b50955586c8ef2704adb5d7cc43)([#8949](https://www.github.com/tauri-apps/tauri/pull/8949)) Fixes android and iOS process spawning not working on Node.js.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.4`
+
+### Breaking Changes
+
+- [`a76fb118`](https://www.github.com/tauri-apps/tauri/commit/a76fb118ce2de22e1bdb4216bf0ac01dfc3e5799)([#8950](https://www.github.com/tauri-apps/tauri/pull/8950)) Changed the capability format to allow configuring both `remote: { urls: Vec<String> }` and `local: bool (default: true)` instead of choosing one on the `context` field.
+
+## \[2.0.0-beta.3]
+
+### Enhancements
+
+- [`a029b9f7`](https://www.github.com/tauri-apps/tauri/commit/a029b9f77e432533a403c292940fa3efba68692c)([#8910](https://www.github.com/tauri-apps/tauri/pull/8910)) Setting up code signing is no longer required on iOS when using the simulator.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.3`
+
+## \[2.0.0-beta.2]
+
+### Enhancements
+
+- [`83a68deb`](https://www.github.com/tauri-apps/tauri/commit/83a68deb5676d39cd4728d2e140f6b46d5f787ed)([#8797](https://www.github.com/tauri-apps/tauri/pull/8797)) Update app template following capabilities configuration change.
+
+### Bug Fixes
+
+- [`aa06a053`](https://www.github.com/tauri-apps/tauri/commit/aa06a0534cf224038866e0ddd6910ea873b2574d)([#8810](https://www.github.com/tauri-apps/tauri/pull/8810)) Fix `tauri plugin android init` printing invalid code that has a missing closing `"`.
+- [`3cee26a5`](https://www.github.com/tauri-apps/tauri/commit/3cee26a58ab44639a12c7816f4096655daa327a4)([#8865](https://www.github.com/tauri-apps/tauri/pull/8865)) On Windows, fixed `tauri info` fails to detect the build tool when the system language is CJK.
+- [`052e8b43`](https://www.github.com/tauri-apps/tauri/commit/052e8b4311d9f0f963a2866163be27bfd8f70c60)([#8838](https://www.github.com/tauri-apps/tauri/pull/8838)) Downgrade minisign dependency fixing updater signing key bug and prevent it from happening in the future.
+- [`fb0d9971`](https://www.github.com/tauri-apps/tauri/commit/fb0d997117367e3387896bcd0fba004579475c40)([#8783](https://www.github.com/tauri-apps/tauri/pull/8783)) Fixes a regression on the `--config` argument not accepting file paths.
+- [`baca704d`](https://www.github.com/tauri-apps/tauri/commit/baca704d4b5fae239fc320d10140f35bd705bfbb)([#8768](https://www.github.com/tauri-apps/tauri/pull/8768)) Do not migrate updater configuration if the active flag is set to false.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.2`
+
+## \[2.0.0-beta.1]
+
+### Enhancements
+
+- [`4e101f80`](https://www.github.com/tauri-apps/tauri/commit/4e101f801657e7d01ce8c22f9c6468067d0caab2)([#8756](https://www.github.com/tauri-apps/tauri/pull/8756)) Moved the capability JSON schema to the `src-tauri/gen` folder so it's easier to track changes on the `capabilities` folder.
+- [`4e101f80`](https://www.github.com/tauri-apps/tauri/commit/4e101f801657e7d01ce8c22f9c6468067d0caab2)([#8756](https://www.github.com/tauri-apps/tauri/pull/8756)) Update app and plugin templates following generated files change from tauri-build and tauri-plugin.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.1`
+
+## \[2.0.0-beta.0]
+
+### New Features
+
+- [`7fcc0bcd`](https://www.github.com/tauri-apps/tauri/commit/7fcc0bcd3482bbc8771e330942ef6cd78cc8ec35)([#8490](https://www.github.com/tauri-apps/tauri/pull/8490)) Add plugin initialization rust code when using `tauri add`
+- [`1878766f`](https://www.github.com/tauri-apps/tauri/commit/1878766f7f81a03b0f0b87ec33ee113d7aa7a902)([#8667](https://www.github.com/tauri-apps/tauri/pull/8667)) Migrate the allowlist config to the new capability file format.
+
+### Enhancements
+
+- [`d6c7568c`](https://www.github.com/tauri-apps/tauri/commit/d6c7568c27445653edf570f3969163bc358ba2ba)([#8720](https://www.github.com/tauri-apps/tauri/pull/8720)) Add `files` option to the AppImage Configuration.
+- [`b3209bb2`](https://www.github.com/tauri-apps/tauri/commit/b3209bb28bb379d5046d577c7e42319d6e76ced0)([#8688](https://www.github.com/tauri-apps/tauri/pull/8688)) Ignore global `.gitignore` when searching for tauri directory.
+- [`e691208e`](https://www.github.com/tauri-apps/tauri/commit/e691208e7b39bb8e3ffc9bf66cff731a5025ef16)([#7837](https://www.github.com/tauri-apps/tauri/pull/7837)) Prevent unneeded double Cargo.toml rewrite on `dev` and `build`.
+- [`f492efd7`](https://www.github.com/tauri-apps/tauri/commit/f492efd7144fdd8d25cac0c4d2389a95ab75fb02)([#8666](https://www.github.com/tauri-apps/tauri/pull/8666)) Update app and plugin template following the new access control permission model.
+
+### Bug Fixes
+
+- [`9cb9aa79`](https://www.github.com/tauri-apps/tauri/commit/9cb9aa7978f231f7da238b33d6ab33fdd2d2c842)([#8672](https://www.github.com/tauri-apps/tauri/pull/8672)) Allow license field in Cargo.toml to be `{ workspace = true }`
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-beta.0`
+
+### Breaking Changes
+
+- [`8de308d1`](https://www.github.com/tauri-apps/tauri/commit/8de308d1bf6a855d7a26af58bd0e744938ba47d8)([#8723](https://www.github.com/tauri-apps/tauri/pull/8723)) Restructured Tauri config per [RFC#5](https://github.com/tauri-apps/rfcs/blob/f3e82a6b0c5390401e855850d47dc7b7d9afd684/texts/0005-tauri-config-restructure.md):
+
+  - Moved `package.productName`, `package.version` and `tauri.bundle.identifier` fields to the top-level.
+  - Removed `package` object.
+  - Renamed `tauri` object to `app`.
+  - Moved `tauri.bundle` object to the top-level.
+  - Renamed `build.distDir` field to `frontendDist`.
+  - Renamed `build.devPath` field to `devUrl` and will no longer accepts paths, it will only accept URLs.
+  - Moved `tauri.pattern` to `app.security.pattern`.
+  - Removed `tauri.bundle.updater` object, and its fields have been moved to the updater plugin under `plugins.updater` object.
+  - Moved `build.withGlobalTauri` to `app.withGlobalTauri`.
+  - Moved `tauri.bundle.dmg` object to `bundle.macOS.dmg`.
+  - Moved `tauri.bundle.deb` object to `bundle.linux.deb`.
+  - Moved `tauri.bundle.appimage` object to `bundle.linux.appimage`.
+  - Removed all license fields from each bundle configuration object and instead added `bundle.license` and `bundle.licenseFile`.
+  - Renamed `AppUrl` to `FrontendDist` and refactored its variants to be more explicit.
+
+## \[2.0.0-alpha.21]
+
+### New Features
+
+- [`27bad32d`](https://www.github.com/tauri-apps/tauri/commit/27bad32d4d4acca8155b20225d529d540fb9aaf4)([#7798](https://www.github.com/tauri-apps/tauri/pull/7798)) Add `files` object on the `tauri > bundle > macOS` configuration option.
+- [`0ec28c39`](https://www.github.com/tauri-apps/tauri/commit/0ec28c39f478de7199a66dd75e8642e1aa1344e6)([#8529](https://www.github.com/tauri-apps/tauri/pull/8529)) Include tauri-build on the migration script.
+
+### Enhancements
+
+- [`091100ac`](https://www.github.com/tauri-apps/tauri/commit/091100acbb507b51de39fb1446f685926f888fd2)([#5202](https://www.github.com/tauri-apps/tauri/pull/5202)) Add RPM packaging
+
+### Bug Fixes
+
+- [`4f73057e`](https://www.github.com/tauri-apps/tauri/commit/4f73057e6fd4c137bc112367fb91f5fc0c8a39f6)([#8486](https://www.github.com/tauri-apps/tauri/pull/8486)) Prevent `Invalid target triple` warnings and correctly set `TAURI_ENV_` vars when target triple contains 4 components.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@2.0.0-alpha.21`
+
+### Breaking Changes
+
+- [`4f73057e`](https://www.github.com/tauri-apps/tauri/commit/4f73057e6fd4c137bc112367fb91f5fc0c8a39f6)([#8486](https://www.github.com/tauri-apps/tauri/pull/8486)) Removed `TAURI_ENV_PLATFORM_TYPE` which will not be set for CLI hook commands anymore, use `TAURI_ENV_PLATFORM` instead. Also Changed value of `TAURI_ENV_PLATFORM` and `TAURI_ENV_ARCH` values to match the target triple more accurately:
+
+  - `darwin` and `androideabi` are no longer replaced with `macos` and `android` in `TAURI_ENV_PLATFORM`.
+  - `i686` and `i586` are no longer replaced with `x86` in `TAURI_ENV_ARCH`.
+
 ## \[2.0.0-alpha.20]
 
 ### Dependencies
@@ -287,6 +512,28 @@
   - [a9c8e565](https://www.github.com/tauri-apps/tauri/commit/a9c8e565c6495961940877df7090f307be16b554) feat: add `android open` and `ios open` commands ([#4946](https://www.github.com/tauri-apps/tauri/pull/4946)) on 2022-08-15
 - First mobile alpha release!
   - [fa3a1098](https://www.github.com/tauri-apps/tauri/commit/fa3a10988a03aed1b66fb17d893b1a9adb90f7cd) feat(ci): prepare 2.0.0-alpha.0 ([#5786](https://www.github.com/tauri-apps/tauri/pull/5786)) on 2022-12-08
+
+## \[1.5.10]
+
+### Bug Fixes
+
+- [`b0f27814`](https://www.github.com/tauri-apps/tauri/commit/b0f27814b90ded2f1ed44b7852080eedbff0d9e4)([#8776](https://www.github.com/tauri-apps/tauri/pull/8776)) Fix `fail to rename app` when using `--profile dev`.
+- [`0bff8c32`](https://www.github.com/tauri-apps/tauri/commit/0bff8c325d004fdead2023f58e0f5fd73a9c22ba)([#8697](https://www.github.com/tauri-apps/tauri/pull/8697)) Fix the built-in dev server failing to serve files when URL had queries `?` and other url components.
+- [`67d7877f`](https://www.github.com/tauri-apps/tauri/commit/67d7877f27f265c133a70d48a46c83ffff31d571)([#8520](https://www.github.com/tauri-apps/tauri/pull/8520)) The cli now also watches cargo workspace members if the tauri folder is the workspace root.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@1.5.10`
+
+## \[1.5.9]
+
+### Bug Fixes
+
+- [`0a2175ea`](https://www.github.com/tauri-apps/tauri/commit/0a2175eabb736b2a4cd01ab682e08be0b5ebb2b9)([#8439](https://www.github.com/tauri-apps/tauri/pull/8439)) Expand glob patterns in workspace member paths so the CLI would watch all matching pathhs.
+
+### Dependencies
+
+- Upgraded to `tauri-cli@1.5.9`
 
 ## \[1.5.8]
 

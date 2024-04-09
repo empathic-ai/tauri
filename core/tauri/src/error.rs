@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -37,6 +37,12 @@ pub enum Error {
   /// Window label must be unique.
   #[error("a window with label `{0}` already exists")]
   WindowLabelAlreadyExists(String),
+  /// Webview label must be unique.
+  #[error("a webview with label `{0}` already exists")]
+  WebviewLabelAlreadyExists(String),
+  /// Cannot use the webview reparent function on webview windows.
+  #[error("cannot reparent when using a WebviewWindow")]
+  CannotReparentWebviewWindow,
   /// Embedded asset not found.
   #[error("asset not found: {0}")]
   AssetNotFound(String),
@@ -71,14 +77,14 @@ pub enum Error {
   IsolationPattern(#[from] tauri_utils::pattern::isolation::Error),
   /// An invalid window URL was provided. Includes details about the error.
   #[error("invalid window url: {0}")]
-  InvalidWindowUrl(&'static str),
+  InvalidWebviewUrl(&'static str),
   /// Invalid glob pattern.
   #[error("invalid glob pattern: {0}")]
   GlobPattern(#[from] glob::PatternError),
-  /// Error decoding PNG image.
-  #[cfg(feature = "icon-png")]
-  #[error("failed to decode PNG: {0}")]
-  PngDecode(#[from] png::DecodingError),
+  /// Image error.
+  #[cfg(any(feature = "image-png", feature = "image-ico"))]
+  #[error("failed to process image: {0}")]
+  Image(#[from] image::error::ImageError),
   /// The Window's raw handle is invalid for the platform.
   #[error("Unexpected `raw_window_handle` for the current platform")]
   InvalidWindowHandle,
@@ -136,7 +142,29 @@ pub enum Error {
   /// The anyhow crate error.
   #[error(transparent)]
   Anyhow(#[from] anyhow::Error),
+  /// webview not found.
+  #[error("webview not found")]
+  WebviewNotFound,
+  /// API requires the unstable feature flag.
+  #[error("this feature requires the `unstable` flag on Cargo.toml")]
+  UnstableFeatureNotSupported,
+  /// Failed to deserialize scope object.
+  #[error("error deserializing scope: {0}")]
+  CannotDeserializeScope(Box<dyn std::error::Error + Send + Sync>),
+
+  /// Failed to get a raw handle.
+  #[error(transparent)]
+  RawHandleError(#[from] raw_window_handle::HandleError),
 }
 
 /// `Result<T, ::tauri::Error>`
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+  #[test]
+  fn error_is_send_sync() {
+    crate::test_utils::assert_send::<super::Error>();
+    crate::test_utils::assert_sync::<super::Error>();
+  }
+}

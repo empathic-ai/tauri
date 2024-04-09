@@ -1,5 +1,5 @@
 // Copyright 2016-2019 Cargo-Bundle developers <https://github.com/burtonageo/cargo-bundle>
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -17,7 +17,6 @@ use crate::bundle::{
 };
 use anyhow::{bail, Context};
 use handlebars::{to_json, Handlebars};
-use log::info;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -223,11 +222,11 @@ fn generate_guid(key: &[u8]) -> Uuid {
 
 // Specifically goes and gets Wix and verifies the download via Sha256
 pub fn get_and_extract_wix(path: &Path) -> crate::Result<()> {
-  info!("Verifying wix package");
+  log::info!("Verifying wix package");
 
   let data = download_and_verify(WIX_URL, WIX_SHA256, HashAlgorithm::Sha256)?;
 
-  info!("extracting WIX");
+  log::info!("extracting WIX");
 
   extract_zip(&data, path)
 }
@@ -331,7 +330,7 @@ fn run_candle(
 
   let candle_exe = wix_toolset_path.join("candle.exe");
 
-  info!(action = "Running"; "candle for {:?}", wxs_file_path);
+  log::info!(action = "Running"; "candle for {:?}", wxs_file_path);
   let mut cmd = Command::new(candle_exe);
   for ext in extensions {
     cmd.arg("-ext");
@@ -400,7 +399,7 @@ pub fn build_wix_app_installer(
   let app_version = convert_version(settings.version_string())?;
 
   // target only supports x64.
-  info!("Target: {}", arch);
+  log::info!("Target: {}", arch);
 
   let main_binary = settings
     .binaries()
@@ -485,32 +484,30 @@ pub fn build_wix_app_installer(
     }
   }
 
-  let language_map: HashMap<String, LanguageMetadata> =
-    serde_json::from_str(include_str!("./languages.json")).unwrap();
-
-  if let Some(wix) = &settings.windows().wix {
-    if let Some(license) = &wix.license {
-      if license.ends_with(".rtf") {
-        data.insert("license", to_json(license));
-      } else {
-        let license_contents = read_to_string(license)?;
-        let license_rtf = format!(
-          r#"{{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033{{\fonttbl{{\f0\fnil\fcharset0 Calibri;}}}}
+  if let Some(license) = settings.license_file() {
+    if license.ends_with(".rtf") {
+      data.insert("license", to_json(license));
+    } else {
+      let license_contents = read_to_string(license)?;
+      let license_rtf = format!(
+        r#"{{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033{{\fonttbl{{\f0\fnil\fcharset0 Calibri;}}}}
 {{\*\generator Riched20 10.0.18362}}\viewkind4\uc1
 \pard\sa200\sl276\slmult1\f0\fs22\lang9 {}\par
 }}
- "#,
-          license_contents.replace('\n', "\\par ")
-        );
-        let rtf_output_path = settings
-          .project_out_directory()
-          .join("wix")
-          .join("LICENSE.rtf");
-        std::fs::write(&rtf_output_path, license_rtf)?;
-        data.insert("license", to_json(rtf_output_path));
-      }
+"#,
+        license_contents.replace('\n', "\\par ")
+      );
+      let rtf_output_path = settings
+        .project_out_directory()
+        .join("wix")
+        .join("LICENSE.rtf");
+      std::fs::write(&rtf_output_path, license_rtf)?;
+      data.insert("license", to_json(rtf_output_path));
     }
   }
+
+  let language_map: HashMap<String, LanguageMetadata> =
+    serde_json::from_str(include_str!("./languages.json")).unwrap();
 
   let configured_languages = settings
     .windows()
@@ -520,7 +517,7 @@ pub fn build_wix_app_installer(
     .unwrap_or_default();
 
   data.insert("product_name", to_json(settings.product_name()));
-  data.insert("version", to_json(&app_version));
+  data.insert("version", to_json(app_version));
   let bundle_id = settings.bundle_identifier();
   let manufacturer = settings
     .publisher()
@@ -570,7 +567,7 @@ pub fn build_wix_app_installer(
   let merge_modules = get_merge_modules(settings)?;
   data.insert("merge_modules", to_json(merge_modules));
 
-  data.insert("app_exe_source", to_json(&app_exe_source));
+  data.insert("app_exe_source", to_json(app_exe_source));
 
   // copy icon from `settings.windows().icon_path` folder to resource folder near msi
   let icon_path = copy_icon(settings, "icon.ico", &settings.windows().icon_path)?;
@@ -618,8 +615,16 @@ pub fn build_wix_app_installer(
     }
   }
 
-  if let Some(file_associations) = &settings.file_associations() {
+  if let Some(file_associations) = settings.file_associations() {
     data.insert("file_associations", to_json(file_associations));
+  }
+
+  if let Some(protocols) = settings.deep_link_protocols() {
+    let schemes = protocols
+      .iter()
+      .flat_map(|p| &p.schemes)
+      .collect::<Vec<_>>();
+    data.insert("deep_link_protocols", to_json(schemes));
   }
 
   if let Some(path) = custom_template_path {
@@ -783,7 +788,7 @@ pub fn build_wix_app_installer(
       app_installer_output_path(settings, &language, settings.version_string(), updater)?;
     create_dir_all(msi_path.parent().unwrap())?;
 
-    info!(action = "Running"; "light to produce {}", display_path(&msi_path));
+    log::info!(action = "Running"; "light to produce {}", display_path(&msi_path));
 
     run_light(
       wix_toolset_path,

@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -9,8 +9,8 @@ use crate::{
     common::CommandExt,
     windows::util::{
       download, download_and_verify, download_webview2_bootstrapper,
-      download_webview2_offline_installer, extract_zip, HashAlgorithm, NSIS_OUTPUT_FOLDER_NAME,
-      NSIS_UPDATER_OUTPUT_FOLDER_NAME,
+      download_webview2_offline_installer, extract_zip, verify_file_hash, HashAlgorithm,
+      NSIS_OUTPUT_FOLDER_NAME, NSIS_UPDATER_OUTPUT_FOLDER_NAME,
     },
   },
   Settings,
@@ -19,7 +19,6 @@ use tauri_utils::display_path;
 
 use anyhow::Context;
 use handlebars::{to_json, Handlebars};
-use log::{info, warn};
 use tauri_utils::config::{NSISInstallerMode, NsisCompression, WebviewInstallMode};
 
 use std::{
@@ -36,7 +35,7 @@ const NSIS_URL: &str =
 #[cfg(target_os = "windows")]
 const NSIS_SHA1: &str = "057e83c7d82462ec394af76c87d06733605543d4";
 const NSIS_APPLICATIONID_URL: &str = "https://github.com/tauri-apps/binary-releases/releases/download/nsis-plugins-v0/NSIS-ApplicationID.zip";
-const NSIS_TAURI_UTILS: &str =
+const NSIS_TAURI_UTILS_URL: &str =
   "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.2.2/nsis_tauri_utils.dll";
 const NSIS_TAURI_UTILS_SHA1: &str = "16DF1D1A5B4D5DF3859447279C55BE36D4109DFB";
 
@@ -60,6 +59,13 @@ const NSIS_REQUIRED_FILES: &[&str] = &[
   "Plugins/x86-unicode/nsis_tauri_utils.dll",
 ];
 
+const NSIS_REQUIRED_FILES_HASH: &[(&str, &str, &str, HashAlgorithm)] = &[(
+  "Plugins/x86-unicode/nsis_tauri_utils.dll",
+  NSIS_TAURI_UTILS_URL,
+  NSIS_TAURI_UTILS_SHA1,
+  HashAlgorithm::Sha1,
+)];
+
 /// Runs all of the commands to build the NSIS installer.
 /// Returns a vector of PathBuf that shows where the NSIS installer was created.
 pub fn bundle_project(settings: &Settings, updater: bool) -> crate::Result<Vec<PathBuf>> {
@@ -72,9 +78,24 @@ pub fn bundle_project(settings: &Settings, updater: bool) -> crate::Result<Vec<P
     .iter()
     .any(|p| !nsis_toolset_path.join(p).exists())
   {
-    warn!("NSIS directory is missing some files. Recreating it.");
+    log::warn!("NSIS directory is missing some files. Recreating it.");
     std::fs::remove_dir_all(&nsis_toolset_path)?;
     get_and_extract_nsis(&nsis_toolset_path, &tauri_tools_path)?;
+  } else {
+    let mismatched = NSIS_REQUIRED_FILES_HASH
+      .iter()
+      .filter(|(p, _, hash, hash_algorithm)| {
+        verify_file_hash(nsis_toolset_path.join(p), hash, *hash_algorithm).is_err()
+      })
+      .collect::<Vec<_>>();
+
+    if !mismatched.is_empty() {
+      log::warn!("NSIS directory contains mis-hashed files. Redownloading them.");
+      for (path, url, hash, hash_algorithim) in mismatched {
+        let data = download_and_verify(url, hash, *hash_algorithim)?;
+        write(nsis_toolset_path.join(path), data)?;
+      }
+    }
   }
 
   build_nsis_app_installer(settings, &nsis_toolset_path, &tauri_tools_path, updater)
@@ -82,12 +103,12 @@ pub fn bundle_project(settings: &Settings, updater: bool) -> crate::Result<Vec<P
 
 // Gets NSIS and verifies the download via Sha1
 fn get_and_extract_nsis(nsis_toolset_path: &Path, _tauri_tools_path: &Path) -> crate::Result<()> {
-  info!("Verifying NSIS package");
+  log::info!("Verifying NSIS package");
 
   #[cfg(target_os = "windows")]
   {
     let data = download_and_verify(NSIS_URL, NSIS_SHA1, HashAlgorithm::Sha1)?;
-    info!("extracting NSIS");
+    log::info!("extracting NSIS");
     extract_zip(&data, _tauri_tools_path)?;
     rename(_tauri_tools_path.join("nsis-3.08"), nsis_toolset_path)?;
   }
@@ -95,7 +116,7 @@ fn get_and_extract_nsis(nsis_toolset_path: &Path, _tauri_tools_path: &Path) -> c
   let nsis_plugins = nsis_toolset_path.join("Plugins");
 
   let data = download(NSIS_APPLICATIONID_URL)?;
-  info!("extracting NSIS ApplicationID plugin");
+  log::info!("extracting NSIS ApplicationID plugin");
   extract_zip(&data, &nsis_plugins)?;
 
   create_dir_all(nsis_plugins.join("x86-unicode"))?;
@@ -107,7 +128,11 @@ fn get_and_extract_nsis(nsis_toolset_path: &Path, _tauri_tools_path: &Path) -> c
     nsis_plugins.join("x86-unicode").join("ApplicationID.dll"),
   )?;
 
-  let data = download_and_verify(NSIS_TAURI_UTILS, NSIS_TAURI_UTILS_SHA1, HashAlgorithm::Sha1)?;
+  let data = download_and_verify(
+    NSIS_TAURI_UTILS_URL,
+    NSIS_TAURI_UTILS_SHA1,
+    HashAlgorithm::Sha1,
+  )?;
   write(
     nsis_plugins
       .join("x86-unicode")
@@ -155,10 +180,10 @@ fn build_nsis_app_installer(
     }
   };
 
-  info!("Target: {}", arch);
+  log::info!("Target: {}", arch);
 
   #[cfg(not(target_os = "windows"))]
-  info!("Code signing is currently only supported on Windows hosts, skipping...");
+  log::info!("Code signing is currently only supported on Windows hosts, skipping...");
 
   let output_path = settings.project_out_directory().join("nsis").join(arch);
   if output_path.exists() {
@@ -211,6 +236,10 @@ fn build_nsis_app_installer(
     to_json(settings.windows().allow_downgrades),
   );
 
+  if let Some(license) = settings.license_file() {
+    data.insert("license", to_json(dunce::canonicalize(license)?));
+  }
+
   let mut install_mode = NSISInstallerMode::CurrentUser;
   let mut languages = vec!["English".into()];
   let mut custom_template_path = None;
@@ -222,9 +251,6 @@ fn build_nsis_app_installer(
     if let Some(langs) = &nsis.languages {
       languages.clear();
       languages.extend_from_slice(langs);
-    }
-    if let Some(license) = &nsis.license {
-      data.insert("license", to_json(dunce::canonicalize(license)?));
     }
     if let Some(installer_icon) = &nsis.installer_icon {
       data.insert(
@@ -270,7 +296,7 @@ fn build_nsis_app_installer(
     if let Some(data) = get_lang_data(lang, custom_language_files.as_ref())? {
       languages_data.push(data);
     } else {
-      log::warn!("Custom tauri messages for {lang} are not translated.\nIf it is a valid language listed on <https://github.com/kichik/nsis/tree/9465c08046f00ccb6eda985abbdbf52c275c6c4d/Contrib/Language%20files>, please open a Tauri feature request\n or you can provide a custom language file for it in `tauri.conf.json > tauri > bundle > windows > nsis > custom_language_files`");
+      log::warn!("Custom tauri messages for {lang} are not translated.\nIf it is a valid language listed on <https://github.com/kichik/nsis/tree/9465c08046f00ccb6eda985abbdbf52c275c6c4d/Contrib/Language%20files>, please open a Tauri feature request\n or you can provide a custom language file for it in `tauri.conf.json > bundle > windows > nsis > custom_language_files`");
     }
   }
 
@@ -323,8 +349,16 @@ fn build_nsis_app_installer(
   let estimated_size = generate_estimated_size(&main_binary_path, &binaries, &resources)?;
   data.insert("estimated_size", to_json(estimated_size));
 
-  if let Some(file_associations) = &settings.file_associations() {
+  if let Some(file_associations) = settings.file_associations() {
     data.insert("file_associations", to_json(file_associations));
+  }
+
+  if let Some(protocols) = settings.deep_link_protocols() {
+    let schemes = protocols
+      .iter()
+      .flat_map(|p| &p.schemes)
+      .collect::<Vec<_>>();
+    data.insert("deep_link_protocols", to_json(schemes));
   }
 
   let silent_webview2_install = if let WebviewInstallMode::DownloadBootstrapper { silent }
@@ -454,7 +488,7 @@ fn build_nsis_app_installer(
   ));
   create_dir_all(nsis_installer_path.parent().unwrap())?;
 
-  info!(action = "Running"; "makensis.exe to produce {}", display_path(&nsis_installer_path));
+  log::info!(action = "Running"; "makensis.exe to produce {}", display_path(&nsis_installer_path));
 
   #[cfg(target_os = "windows")]
   let mut nsis_cmd = Command::new(_nsis_toolset_path.join("makensis.exe"));
@@ -485,7 +519,7 @@ fn build_nsis_app_installer(
 }
 
 fn handlebars_or(
-  h: &handlebars::Helper<'_, '_>,
+  h: &handlebars::Helper<'_>,
   _: &Handlebars<'_>,
   _: &handlebars::Context,
   _: &mut handlebars::RenderContext<'_, '_>,
@@ -503,7 +537,7 @@ fn handlebars_or(
 }
 
 fn association_description(
-  h: &handlebars::Helper<'_, '_>,
+  h: &handlebars::Helper<'_>,
   _: &Handlebars<'_>,
   _: &handlebars::Context,
   _: &mut handlebars::RenderContext<'_, '_>,
@@ -628,6 +662,7 @@ fn get_lang_data(
     "japanese" => Some(include_str!("./templates/nsis-languages/Japanese.nsh")),
     "korean" => Some(include_str!("./templates/nsis-languages/Korean.nsh")),
     "portuguesebr" => Some(include_str!("./templates/nsis-languages/PortugueseBR.nsh")),
+    "russian" => Some(include_str!("./templates/nsis-languages/Russian.nsh")),
     "tradchinese" => Some(include_str!("./templates/nsis-languages/TradChinese.nsh")),
     "simpchinese" => Some(include_str!("./templates/nsis-languages/SimpChinese.nsh")),
     "french" => Some(include_str!("./templates/nsis-languages/French.nsh")),

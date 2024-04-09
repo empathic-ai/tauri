@@ -1,4 +1,4 @@
-# Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+# Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-License-Identifier: MIT
 
@@ -12,6 +12,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/test-cli-rs.yml'
+      - 'core/tauri-utils/**'
+      - 'tooling/bundler/**'
       - 'tooling/cli/**'
 
 env:

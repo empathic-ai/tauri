@@ -1,15 +1,14 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
 use crate::{
   helpers::{
     app_paths::tauri_dir,
-    config::{
-      get as get_config, reload as reload_config, AppUrl, Config as TauriConfig, WindowUrl,
-    },
+    config::{get as get_config, reload as reload_config, Config as TauriConfig},
   },
   interface::{AppInterface, AppSettings, DevProcess, Interface, Options as InterfaceOptions},
+  ConfigValue,
 };
 use anyhow::{bail, Result};
 use heck::ToSnekCase;
@@ -70,9 +69,14 @@ impl DevChild {
 
 impl DevProcess for DevChild {
   fn kill(&self) -> std::io::Result<()> {
-    self.child.kill()?;
     self.manually_killed_process.store(true, Ordering::Relaxed);
-    Ok(())
+    match self.child.kill() {
+      Ok(_) => Ok(()),
+      Err(e) => {
+        self.manually_killed_process.store(false, Ordering::Relaxed);
+        Err(e)
+      }
+    }
   }
 
   fn try_wait(&self) -> std::io::Result<Option<ExitStatus>> {
@@ -85,10 +89,6 @@ impl DevProcess for DevChild {
 
   fn manually_killed_process(&self) -> bool {
     self.manually_killed_process.load(Ordering::Relaxed)
-  }
-
-  fn is_building_app(&self) -> bool {
-    false
   }
 }
 
@@ -154,21 +154,24 @@ impl Default for CliOptions {
 
 fn setup_dev_config(
   target: Target,
-  config_extension: &mut Option<String>,
+  config_extension: &mut Option<ConfigValue>,
   force_ip_prompt: bool,
 ) -> crate::Result<()> {
-  let config = get_config(target.platform_target(), config_extension.as_deref())?;
+  let config = get_config(
+    target.platform_target(),
+    config_extension.as_ref().map(|c| &c.0),
+  )?;
 
-  let mut dev_path = config
+  let mut dev_url = config
     .lock()
     .unwrap()
     .as_ref()
     .unwrap()
     .build
-    .dev_path
+    .dev_url
     .clone();
 
-  if let AppUrl::Url(WindowUrl::External(url)) = &mut dev_path {
+  if let Some(url) = &mut dev_url {
     let localhost = match url.host() {
       Some(url::Host::Domain(d)) => d == "localhost",
       Some(url::Host::Ipv4(i)) => {
@@ -180,13 +183,22 @@ fn setup_dev_config(
       let ip = crate::dev::local_ip_address(force_ip_prompt);
       url.set_host(Some(&ip.to_string())).unwrap();
       if let Some(c) = config_extension {
-        let mut c: tauri_utils::config::Config = serde_json::from_str(c)?;
-        c.build.dev_path = dev_path.clone();
-        config_extension.replace(serde_json::to_string(&c).unwrap());
+        if let Some(build) = c
+          .0
+          .as_object_mut()
+          .and_then(|root| root.get_mut("build"))
+          .and_then(|build| build.as_object_mut())
+        {
+          build.insert("devUrl".into(), url.to_string().into());
+        }
       } else {
-        config_extension.replace(format!(r#"{{ "build": {{ "devPath": "{url}" }} }}"#));
+        config_extension.replace(crate::ConfigValue(serde_json::json!({
+          "build": {
+            "devUrl": url
+          }
+        })));
       }
-      reload_config(config_extension.as_deref())?;
+      reload_config(config_extension.as_ref().map(|c| &c.0))?;
     }
   }
 
@@ -217,7 +229,7 @@ fn env() -> Result<Env, EnvError> {
   Ok(env)
 }
 
-pub struct OptionsHandle(Runtime, ServerHandle);
+pub struct OptionsHandle(#[allow(unused)] Runtime, #[allow(unused)] ServerHandle);
 
 /// Writes CLI options to be used later on the Xcode and Android Studio build commands
 pub fn write_options(identifier: &str, mut options: CliOptions) -> crate::Result<OptionsHandle> {
@@ -272,8 +284,8 @@ fn read_options(identifier: &str) -> CliOptions {
   options
 }
 
-pub fn get_app(config: &TauriConfig) -> App {
-  let mut s = config.tauri.bundle.identifier.rsplit('.');
+pub fn get_app(config: &TauriConfig, interface: &AppInterface) -> App {
+  let mut s = config.identifier.rsplit('.');
   let app_name = s.next().unwrap_or("app").to_string();
   let mut domain = String::new();
   for w in s {
@@ -281,23 +293,14 @@ pub fn get_app(config: &TauriConfig) -> App {
     domain.push('.');
   }
   if domain.is_empty() {
-    domain = config.tauri.bundle.identifier.clone();
+    domain = config.identifier.clone();
     if domain.is_empty() {
-      log::error!(
-        "Bundle identifier set in `tauri.conf.json > tauri > bundle > identifier` cannot be empty"
-      );
+      log::error!("Bundle identifier set in `tauri.conf.json > identifier` cannot be empty");
       exit(1);
     }
   } else {
     domain.pop();
   }
-
-  let interface = AppInterface::new(
-    config,
-    // the target triple is not relevant
-    Some("".into()),
-  )
-  .expect("failed to load interface");
 
   let app_name = interface.app_settings().app_name().unwrap_or(app_name);
   let lib_name = interface
@@ -308,16 +311,17 @@ pub fn get_app(config: &TauriConfig) -> App {
   let raw = RawAppConfig {
     name: app_name,
     lib_name: Some(lib_name),
-    stylized_name: config.package.product_name.clone(),
+    stylized_name: config.product_name.clone(),
     domain,
     asset_dir: None,
     template_pack: None,
   };
+
+  let app_settings = interface.app_settings();
   App::from_raw(tauri_dir(), raw)
     .unwrap()
     .with_target_dir_resolver(move |target, profile| {
-      let bin_path = interface
-        .app_settings()
+      let bin_path = app_settings
         .app_binary_path(&InterfaceOptions {
           debug: matches!(profile, Profile::Debug),
           target: Some(target.into()),

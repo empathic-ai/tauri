@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -157,11 +157,11 @@ impl<R: Runtime, C: DeserializeOwned> PluginApi<R, C> {
     &self,
     init_fn: unsafe fn() -> *const std::ffi::c_void,
   ) -> Result<PluginHandle<R>, PluginInvokeError> {
-    if let Some(window) = self.handle.manager.windows().values().next() {
+    if let Some(webview) = self.handle.manager.webviews().values().next() {
       let (tx, rx) = channel();
       let name = self.name;
       let config = self.raw_config.clone();
-      window
+      webview
         .with_webview(move |w| {
           unsafe {
             crate::ios::register_plugin(

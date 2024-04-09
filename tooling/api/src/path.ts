@@ -1,11 +1,11 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
 /**
  * The path module provides utilities for working with file and directory paths.
  *
- * This package is also accessible with `window.__TAURI__.path` when [`build.withGlobalTauri`](https://tauri.app/v1/api/config/#buildconfig.withglobaltauri) in `tauri.conf.json` is set to `true`.
+ * This package is also accessible with `window.__TAURI__.path` when [`app.withGlobalTauri`](https://tauri.app/v1/api/config/#appconfig.withglobaltauri) in `tauri.conf.json` is set to `true`.
  *
  * It is recommended to allowlist only the APIs you use for optimal bundle size and security.
  * @module
@@ -423,7 +423,7 @@ async function resourceDir(): Promise<string> {
  * ```
  *
  * @param resourcePath The path to the resource.
- * Must follow the same syntax as defined in `tauri.conf.json > tauri > bundle > resources`, i.e. keeping subfolders and parent dir components (`../`).
+ * Must follow the same syntax as defined in `tauri.conf.json > bundle > resources`, i.e. keeping subfolders and parent dir components (`../`).
  * @returns The full path to the resource.
  *
  * @since 1.0.0
@@ -581,7 +581,7 @@ async function resolve(...paths: string[]): Promise<string> {
  * ```typescript
  * import { normalize, appDataDir } from '@tauri-apps/api/path';
  * const appDataDirPath = await appDataDir();
- * const path = await normalize(appDataDirPath, '..', 'users', 'tauri', 'avatar.png');
+ * const path = await normalize(`${appDataDirPath}/../users/tauri/avatar.png`);
  * ```
  *
  * @since 1.0.0
@@ -609,9 +609,9 @@ async function join(...paths: string[]): Promise<string> {
  * Returns the directory name of a `path`. Trailing directory separators are ignored.
  * @example
  * ```typescript
- * import { dirname, appDataDir } from '@tauri-apps/api/path';
- * const appDataDirPath = await appDataDir();
- * const dir = await dirname(appDataDirPath);
+ * import { dirname } from '@tauri-apps/api/path';
+ * const dir = await dirname('/path/to/somedir/');
+ * assert(dir === 'somedir');
  * ```
  *
  * @since 1.0.0
@@ -624,10 +624,9 @@ async function dirname(path: string): Promise<string> {
  * Returns the extension of the `path`.
  * @example
  * ```typescript
- * import { extname, resolveResource } from '@tauri-apps/api/path';
- * const resourcePath = await resolveResource('app.conf');
- * const ext = await extname(resourcePath);
- * assert(ext === 'conf');
+ * import { extname } from '@tauri-apps/api/path';
+ * const ext = await extname('/path/to/file.html');
+ * assert(ext === 'html');
  * ```
  *
  * @since 1.0.0
@@ -640,12 +639,10 @@ async function extname(path: string): Promise<string> {
  * Returns the last portion of a `path`. Trailing directory separators are ignored.
  * @example
  * ```typescript
- * import { basename, resolveResource } from '@tauri-apps/api/path';
- * const resourcePath = await resolveResource('app.conf');
- * const base = await basename(resourcePath);
+ * import { basename } from '@tauri-apps/api/path';
+ * const base = await basename('path/to/app.conf');
  * assert(base === 'app.conf');
  * ```
- *
  * @param ext An optional file extension to be removed from the returned path.
  *
  * @since 1.0.0

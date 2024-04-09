@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -7,10 +7,10 @@
 
 use crate::utils::config::WindowEffectsConfig;
 use crate::window::{Effect, EffectState};
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
 use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState};
 
-pub fn apply_effects(window: impl HasRawWindowHandle, effects: WindowEffectsConfig) {
+pub fn apply_effects(window: impl HasWindowHandle, effects: WindowEffectsConfig) {
   let WindowEffectsConfig {
     effects,
     radius,

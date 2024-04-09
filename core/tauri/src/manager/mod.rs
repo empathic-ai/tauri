@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -13,7 +13,6 @@ use serde::Serialize;
 use url::Url;
 
 use tauri_macros::default_runtime;
-use tauri_utils::debug_eprintln;
 use tauri_utils::{
   assets::{AssetKey, CspHash},
   config::{Csp, CspDirectiveSources},
@@ -21,23 +20,20 @@ use tauri_utils::{
 };
 
 use crate::{
-  app::{AppHandle, GlobalWindowEventListener, OnPageLoad},
-  event::{assert_event_name_is_valid, Event, EventId, Listeners},
-  ipc::{Invoke, InvokeHandler, InvokeResponder},
+  app::{AppHandle, GlobalWebviewEventListener, GlobalWindowEventListener, OnPageLoad},
+  event::{assert_event_name_is_valid, Event, EventId, EventTarget, Listeners},
+  ipc::{Invoke, InvokeHandler, InvokeResponder, RuntimeAuthority},
   plugin::PluginStore,
-  utils::{
-    assets::Assets,
-    config::{AppUrl, Config, WindowUrl},
-    PackageInfo,
-  },
-  Context, Pattern, Runtime, StateManager, Window,
+  utils::{config::Config, PackageInfo},
+  Assets, Context, Pattern, Runtime, StateManager, Window,
 };
-use crate::{event::EmitArgs, resources::ResourceTable};
+use crate::{event::EmitArgs, resources::ResourceTable, Webview};
 
 #[cfg(desktop)]
 mod menu;
 #[cfg(all(desktop, feature = "tray-icon"))]
 mod tray;
+pub mod webview;
 pub mod window;
 
 #[derive(Default)]
@@ -50,16 +46,17 @@ struct CspHashStrings {
 /// Sets the CSP value to the asset HTML if needed (on Linux).
 /// Returns the CSP string for access on the response header (on Windows and macOS).
 #[allow(clippy::borrowed_box)]
-fn set_csp<R: Runtime>(
+pub(crate) fn set_csp<R: Runtime>(
   asset: &mut String,
-  assets: &Box<dyn Assets>,
+  assets: &impl std::borrow::Borrow<dyn Assets<R>>,
   asset_path: &AssetKey,
   manager: &AppManager<R>,
   csp: Csp,
-) -> String {
+) -> HashMap<String, CspDirectiveSources> {
   let mut csp = csp.into();
   let hash_strings =
     assets
+      .borrow()
       .csp_hashes(asset_path)
       .fold(CspHashStrings::default(), |mut acc, hash| {
         match hash {
@@ -70,7 +67,7 @@ fn set_csp<R: Runtime>(
             acc.style.push(hash.into());
           }
           _csp_hash => {
-            debug_eprintln!("Unknown CspHash variant encountered: {:?}", _csp_hash);
+            log::debug!("Unknown CspHash variant encountered: {:?}", _csp_hash);
           }
         }
 
@@ -79,7 +76,7 @@ fn set_csp<R: Runtime>(
 
   let dangerous_disable_asset_csp_modification = &manager
     .config()
-    .tauri
+    .app
     .security
     .dangerous_disable_asset_csp_modification;
   if dangerous_disable_asset_csp_modification.can_modify("script-src") {
@@ -102,15 +99,7 @@ fn set_csp<R: Runtime>(
     );
   }
 
-  #[cfg(feature = "isolation")]
-  if let Pattern::Isolation { schema, .. } = &*manager.pattern {
-    let default_src = csp
-      .entry("default-src".into())
-      .or_insert_with(Default::default);
-    default_src.push(crate::pattern::format_real_schema(schema));
-  }
-
-  Csp::DirectiveMap(csp).to_string()
+  csp
 }
 
 // inspired by https://github.com/rust-lang/rust/blob/1be5c8f90912c446ecbdc405cbc4a89f9acd20fd/library/alloc/src/str.rs#L260-L297
@@ -178,17 +167,19 @@ pub struct Asset {
 
 #[default_runtime(crate::Wry, wry)]
 pub struct AppManager<R: Runtime> {
+  pub runtime_authority: Mutex<RuntimeAuthority>,
   pub window: window::WindowManager<R>,
+  pub webview: webview::WebviewManager<R>,
   #[cfg(all(desktop, feature = "tray-icon"))]
   pub tray: tray::TrayManager<R>,
   #[cfg(desktop)]
   pub menu: menu::MenuManager<R>,
 
   pub(crate) plugins: Mutex<PluginStore<R>>,
-  pub listeners: Listeners<R>,
+  pub listeners: Listeners,
   pub state: Arc<StateManager>,
   pub config: Config,
-  pub assets: Box<dyn Assets>,
+  pub assets: Box<dyn Assets<R>>,
 
   pub app_icon: Option<Vec<u8>>,
 
@@ -196,6 +187,9 @@ pub struct AppManager<R: Runtime> {
 
   /// Application pattern.
   pub pattern: Arc<Pattern>,
+
+  /// Global API scripts collected from plugins.
+  pub plugin_global_api_scripts: Arc<Option<&'static [&'static str]>>,
 
   /// Application Resources Table
   pub(crate) resources_table: Arc<Mutex<ResourceTable>>,
@@ -225,13 +219,14 @@ impl<R: Runtime> fmt::Debug for AppManager<R> {
 impl<R: Runtime> AppManager<R> {
   #[allow(clippy::too_many_arguments, clippy::type_complexity)]
   pub(crate) fn with_handlers(
-    #[allow(unused_mut)] mut context: Context<impl Assets>,
+    #[allow(unused_mut)] mut context: Context<R>,
     plugins: PluginStore<R>,
     invoke_handler: Box<InvokeHandler<R>>,
     on_page_load: Option<Arc<OnPageLoad<R>>>,
-    uri_scheme_protocols: HashMap<String, Arc<window::UriSchemeProtocol<R>>>,
+    uri_scheme_protocols: HashMap<String, Arc<webview::UriSchemeProtocol<R>>>,
     state: StateManager,
     window_event_listeners: Vec<GlobalWindowEventListener<R>>,
+    webiew_event_listeners: Vec<GlobalWebviewEventListener<R>>,
     #[cfg(desktop)] window_menu_event_listeners: HashMap<
       String,
       crate::app::GlobalMenuEventListener<Window<R>>,
@@ -245,13 +240,18 @@ impl<R: Runtime> AppManager<R> {
     }
 
     Self {
+      runtime_authority: Mutex::new(context.runtime_authority),
       window: window::WindowManager {
         windows: Mutex::default(),
+        default_icon: context.default_window_icon,
+        event_listeners: Arc::new(window_event_listeners),
+      },
+      webview: webview::WebviewManager {
+        webviews: Mutex::default(),
         invoke_handler,
         on_page_load,
-        default_icon: context.default_window_icon,
         uri_scheme_protocols: Mutex::new(uri_scheme_protocols),
-        event_listeners: Arc::new(window_event_listeners),
+        event_listeners: Arc::new(webiew_event_listeners),
         invoke_responder,
         invoke_initialization_script,
       },
@@ -277,6 +277,7 @@ impl<R: Runtime> AppManager<R> {
       app_icon: context.app_icon,
       package_info: context.package_info,
       pattern: Arc::new(context.pattern),
+      plugin_global_api_scripts: Arc::new(context.plugin_global_api_scripts),
       resources_table: Arc::default(),
     }
   }
@@ -288,26 +289,20 @@ impl<R: Runtime> AppManager<R> {
 
   /// Get the base path to serve data from.
   ///
-  /// * In dev mode, this will be based on the `devPath` configuration value.
-  /// * Otherwise, this will be based on the `distDir` configuration value.
+  /// * In dev mode, this will be based on the `devUrl` configuration value.
+  /// * Otherwise, this will be based on the `frontendDist` configuration value.
   #[cfg(not(dev))]
-  fn base_path(&self) -> &AppUrl {
-    &self.config.build.dist_dir
+  fn base_path(&self) -> Option<&Url> {
+    use crate::utils::config::FrontendDist;
+    match self.config.build.frontend_dist.as_ref() {
+      Some(FrontendDist::Url(url)) => Some(url),
+      _ => None,
+    }
   }
 
   #[cfg(dev)]
-  fn base_path(&self) -> &AppUrl {
-    &self.config.build.dev_path
-  }
-
-  /// Get the base URL to use for webview requests.
-  ///
-  /// In dev mode, this will be based on the `devPath` configuration value.
-  pub(crate) fn get_url(&self) -> Cow<'_, Url> {
-    match self.base_path() {
-      AppUrl::Url(WindowUrl::External(url)) => Cow::Borrowed(url),
-      _ => self.protocol_url(),
-    }
+  fn base_path(&self) -> Option<&Url> {
+    self.config.build.dev_url.as_ref()
   }
 
   pub(crate) fn protocol_url(&self) -> Cow<'_, Url> {
@@ -318,17 +313,27 @@ impl<R: Runtime> AppManager<R> {
     }
   }
 
+  /// Get the base URL to use for webview requests.
+  ///
+  /// In dev mode, this will be based on the `devUrl` configuration value.
+  pub(crate) fn get_url(&self) -> Cow<'_, Url> {
+    match self.base_path() {
+      Some(url) => Cow::Borrowed(url),
+      _ => self.protocol_url(),
+    }
+  }
+
   fn csp(&self) -> Option<Csp> {
-    if cfg!(feature = "custom-protocol") {
-      self.config.tauri.security.csp.clone()
+    if !crate::dev() {
+      self.config.app.security.csp.clone()
     } else {
       self
         .config
-        .tauri
+        .app
         .security
         .dev_csp
         .clone()
-        .or_else(|| self.config.tauri.security.csp.clone())
+        .or_else(|| self.config.app.security.csp.clone())
     }
   }
 
@@ -353,14 +358,14 @@ impl<R: Runtime> AppManager<R> {
     let asset_response = assets
       .get(&path.as_str().into())
       .or_else(|| {
-        debug_eprintln!("Asset `{path}` not found; fallback to {path}.html");
+        log::debug!("Asset `{path}` not found; fallback to {path}.html");
         let fallback = format!("{}.html", path.as_str()).into();
         let asset = assets.get(&fallback);
         asset_path = fallback;
         asset
       })
       .or_else(|| {
-        debug_eprintln!(
+        log::debug!(
           "Asset `{}` not found; fallback to {}/index.html",
           path,
           path
@@ -371,7 +376,7 @@ impl<R: Runtime> AppManager<R> {
         asset
       })
       .or_else(|| {
-        debug_eprintln!("Asset `{}` not found; fallback to index.html", path);
+        log::debug!("Asset `{}` not found; fallback to index.html", path);
         let fallback = AssetKey::from("index.html");
         let asset = assets.get(&fallback);
         asset_path = fallback;
@@ -388,7 +393,17 @@ impl<R: Runtime> AppManager<R> {
         let final_data = if is_html {
           let mut asset = String::from_utf8_lossy(&asset).into_owned();
           if let Some(csp) = self.csp() {
-            csp_header.replace(set_csp(&mut asset, &self.assets, &asset_path, self, csp));
+            #[allow(unused_mut)]
+            let mut csp_map = set_csp(&mut asset, &self.assets, &asset_path, self, csp);
+            #[cfg(feature = "isolation")]
+            if let Pattern::Isolation { schema, .. } = &*self.pattern {
+              let default_src = csp_map
+                .entry("default-src".into())
+                .or_insert_with(Default::default);
+              default_src.push(crate::pattern::format_real_schema(schema));
+            }
+
+            csp_header.replace(Csp::DirectiveMap(csp_map).to_string());
           }
 
           asset.as_bytes().to_vec()
@@ -403,18 +418,18 @@ impl<R: Runtime> AppManager<R> {
         })
       }
       Err(e) => {
-        debug_eprintln!("{:?}", e); // TODO log::error!
+        log::error!("{:?}", e);
         Err(Box::new(e))
       }
     }
   }
 
-  pub(crate) fn listeners(&self) -> &Listeners<R> {
+  pub(crate) fn listeners(&self) -> &Listeners {
     &self.listeners
   }
 
   pub fn run_invoke_handler(&self, invoke: Invoke<R>) -> bool {
-    (self.window.invoke_handler)(invoke)
+    (self.webview.invoke_handler)(invoke)
   }
 
   pub fn extend_api(&self, plugin: &str, invoke: Invoke<R>) -> bool {
@@ -444,11 +459,11 @@ impl<R: Runtime> AppManager<R> {
   pub fn listen<F: Fn(Event) + Send + 'static>(
     &self,
     event: String,
-    window: Option<Window<R>>,
+    target: EventTarget,
     handler: F,
   ) -> EventId {
     assert_event_name_is_valid(&event);
-    self.listeners().listen(event, window, handler)
+    self.listeners().listen(event, target, handler)
   }
 
   pub fn unlisten(&self, id: EventId) {
@@ -458,67 +473,49 @@ impl<R: Runtime> AppManager<R> {
   pub fn once<F: FnOnce(Event) + Send + 'static>(
     &self,
     event: String,
-    window: Option<String>,
+    target: EventTarget,
     handler: F,
-  ) {
+  ) -> EventId {
     assert_event_name_is_valid(&event);
-    self
-      .listeners()
-      .once(event, window.and_then(|w| self.get_window(&w)), handler)
+    self.listeners().once(event, target, handler)
   }
 
-  pub fn emit_filter<S, F>(
-    &self,
-    event: &str,
-    source_window_label: Option<&str>,
-    payload: S,
-    filter: F,
-  ) -> crate::Result<()>
+  pub fn emit_filter<S, F>(&self, event: &str, payload: S, filter: F) -> crate::Result<()>
   where
     S: Serialize + Clone,
-    F: Fn(&Window<R>) -> bool,
+    F: Fn(&EventTarget) -> bool,
   {
     assert_event_name_is_valid(event);
 
-    let emit_args = EmitArgs::from(event, source_window_label, payload)?;
+    #[cfg(feature = "tracing")]
+    let _span = tracing::debug_span!("emit::run").entered();
+    let emit_args = EmitArgs::new(event, payload)?;
 
-    self
-      .window
-      .windows_lock()
-      .values()
-      .filter(|w| {
-        w.has_js_listener(None, event)
-          || w.has_js_listener(source_window_label.map(Into::into), event)
-      })
-      .filter(|w| filter(w))
-      .try_for_each(|window| window.emit_js(&emit_args))?;
+    let listeners = self.listeners();
 
-    self.listeners().emit_filter(&emit_args, Some(filter))?;
+    listeners.emit_js_filter(
+      self.webview.webviews_lock().values(),
+      event,
+      &emit_args,
+      Some(&filter),
+    )?;
+
+    listeners.emit_filter(emit_args, Some(filter))?;
 
     Ok(())
   }
 
-  pub fn emit<S: Serialize + Clone>(
-    &self,
-    event: &str,
-    source_window_label: Option<&str>,
-    payload: S,
-  ) -> crate::Result<()> {
+  pub fn emit<S: Serialize + Clone>(&self, event: &str, payload: S) -> crate::Result<()> {
     assert_event_name_is_valid(event);
 
-    let emit_args = EmitArgs::from(event, source_window_label, payload)?;
+    #[cfg(feature = "tracing")]
+    let _span = tracing::debug_span!("emit::run").entered();
+    let emit_args = EmitArgs::new(event, payload)?;
 
-    self
-      .window
-      .windows_lock()
-      .values()
-      .filter(|w| {
-        w.has_js_listener(None, event)
-          || w.has_js_listener(source_window_label.map(Into::into), event)
-      })
-      .try_for_each(|window| window.emit_js(&emit_args))?;
+    let listeners = self.listeners();
 
-    self.listeners().emit(&emit_args)?;
+    listeners.emit_js(self.webview.webviews_lock().values(), event, &emit_args)?;
+    listeners.emit(emit_args)?;
 
     Ok(())
   }
@@ -536,11 +533,37 @@ impl<R: Runtime> AppManager<R> {
       .map(|w| w.1.clone())
   }
 
+  pub(crate) fn on_window_close(&self, label: &str) {
+    let window = self.window.windows_lock().remove(label);
+    if let Some(window) = window {
+      for webview in window.webviews() {
+        self.webview.webviews_lock().remove(webview.label());
+      }
+    }
+  }
+
+  pub(crate) fn on_webview_close(&self, label: &str) {
+    self.webview.webviews_lock().remove(label);
+
+    if let Ok(webview_labels_array) = serde_json::to_string(&self.webview.labels()) {
+      let _ = self.webview.eval_script_all(format!(
+          r#"(function () {{ const metadata = window.__TAURI_INTERNALS__.metadata; if (metadata != null) {{ metadata.webviews = {webview_labels_array}.map(function (label) {{ return {{ label: label }} }}) }} }})()"#,
+        ));
+    }
+  }
+
   pub fn windows(&self) -> HashMap<String, Window<R>> {
     self.window.windows_lock().clone()
   }
 
-  /// Resources table managed by the application.
+  pub fn get_webview(&self, label: &str) -> Option<Webview<R>> {
+    self.webview.webviews_lock().get(label).cloned()
+  }
+
+  pub fn webviews(&self) -> HashMap<String, Webview<R>> {
+    self.webview.webviews_lock().clone()
+  }
+
   pub(crate) fn resources_table(&self) -> MutexGuard<'_, ResourceTable> {
     self
       .resources_table
@@ -595,17 +618,25 @@ mod test {
   };
 
   use crate::{
+    event::EventTarget,
     generate_context,
     plugin::PluginStore,
     test::{mock_app, MockRuntime},
-    App, Manager, StateManager, Window, WindowBuilder, Wry,
+    webview::WebviewBuilder,
+    window::WindowBuilder,
+    App, Manager, StateManager, Webview, WebviewWindow, WebviewWindowBuilder, Window, Wry,
   };
 
   use super::AppManager;
 
+  const APP_LISTEN_ID: &str = "App::listen";
+  const APP_LISTEN_ANY_ID: &str = "App::listen_any";
   const WINDOW_LISTEN_ID: &str = "Window::listen";
-  const WINDOW_LISTEN_GLOBAL_ID: &str = "Window::listen_global";
-  const APP_LISTEN_GLOBAL_ID: &str = "App::listen_global";
+  const WINDOW_LISTEN_ANY_ID: &str = "Window::listen_any";
+  const WEBVIEW_LISTEN_ID: &str = "Webview::listen";
+  const WEBVIEW_LISTEN_ANY_ID: &str = "Webview::listen_any";
+  const WEBVIEW_WINDOW_LISTEN_ID: &str = "WebviewWindow::listen";
+  const WEBVIEW_WINDOW_LISTEN_ANY_ID: &str = "WebviewWindow::listen_any";
   const TEST_EVENT_NAME: &str = "event";
 
   #[test]
@@ -618,6 +649,7 @@ mod test {
       None,
       Default::default(),
       StateManager::new(),
+      Default::default(),
       Default::default(),
       Default::default(),
       (None, "".into()),
@@ -642,160 +674,228 @@ mod test {
   struct EventSetup {
     app: App<MockRuntime>,
     window: Window<MockRuntime>,
+    webview: Webview<MockRuntime>,
+    webview_window: WebviewWindow<MockRuntime>,
     tx: Sender<(&'static str, String)>,
     rx: Receiver<(&'static str, String)>,
   }
 
-  fn setup_events() -> EventSetup {
+  fn setup_events(setup_any: bool) -> EventSetup {
     let app = mock_app();
-    let window = WindowBuilder::new(&app, "main", Default::default())
+
+    let window = WindowBuilder::new(&app, "main-window").build().unwrap();
+
+    let webview = window
+      .add_child(
+        WebviewBuilder::new("main-webview", Default::default()),
+        crate::LogicalPosition::new(0, 0),
+        window.inner_size().unwrap(),
+      )
+      .unwrap();
+
+    let webview_window = WebviewWindowBuilder::new(&app, "main-webview-window", Default::default())
       .build()
       .unwrap();
 
     let (tx, rx) = channel();
 
-    let tx_ = tx.clone();
-    window.listen(TEST_EVENT_NAME, move |evt| {
-      tx_
-        .send((
-          WINDOW_LISTEN_ID,
-          serde_json::from_str::<String>(evt.payload()).unwrap(),
-        ))
-        .unwrap();
-    });
+    macro_rules! setup_listener {
+      ($type:ident, $id:ident, $any_id:ident) => {
+        let tx_ = tx.clone();
+        $type.listen(TEST_EVENT_NAME, move |evt| {
+          tx_
+            .send(($id, serde_json::from_str::<String>(evt.payload()).unwrap()))
+            .unwrap();
+        });
 
-    let tx_ = tx.clone();
-    window.listen_global(TEST_EVENT_NAME, move |evt| {
-      tx_
-        .send((
-          WINDOW_LISTEN_GLOBAL_ID,
-          serde_json::from_str::<String>(evt.payload()).unwrap(),
-        ))
-        .unwrap();
-    });
+        if setup_any {
+          let tx_ = tx.clone();
+          $type.listen_any(TEST_EVENT_NAME, move |evt| {
+            tx_
+              .send((
+                $any_id,
+                serde_json::from_str::<String>(evt.payload()).unwrap(),
+              ))
+              .unwrap();
+          });
+        }
+      };
+    }
 
-    let tx_ = tx.clone();
-    app.listen_global(TEST_EVENT_NAME, move |evt| {
-      tx_
-        .send((
-          APP_LISTEN_GLOBAL_ID,
-          serde_json::from_str::<String>(evt.payload()).unwrap(),
-        ))
-        .unwrap();
-    });
+    setup_listener!(app, APP_LISTEN_ID, APP_LISTEN_ANY_ID);
+    setup_listener!(window, WINDOW_LISTEN_ID, WINDOW_LISTEN_ANY_ID);
+    setup_listener!(webview, WEBVIEW_LISTEN_ID, WEBVIEW_LISTEN_ANY_ID);
+    setup_listener!(
+      webview_window,
+      WEBVIEW_WINDOW_LISTEN_ID,
+      WEBVIEW_WINDOW_LISTEN_ANY_ID
+    );
 
     EventSetup {
       app,
       window,
+      webview,
+      webview_window,
       tx,
       rx,
     }
   }
 
-  fn assert_events(received: &[&str], expected: &[&str]) {
+  fn assert_events(kind: &str, received: &[&str], expected: &[&str]) {
     for e in expected {
-      assert!(received.contains(e), "{e} did not receive global event");
+      assert!(received.contains(e), "{e} did not receive `{kind}` event");
     }
     assert_eq!(
       received.len(),
       expected.len(),
-      "received {:?} events but expected {:?}",
+      "received {:?} `{kind}` events but expected {:?}",
       received,
       expected
     );
   }
 
   #[test]
-  fn app_global_events() {
+  fn emit() {
     let EventSetup {
       app,
-      window: _,
+      window,
+      webview,
+      webview_window,
       tx: _,
       rx,
-    } = setup_events();
+    } = setup_events(true);
 
+    run_emit_test("emit (app)", app, &rx);
+    run_emit_test("emit (window)", window, &rx);
+    run_emit_test("emit (webview)", webview, &rx);
+    run_emit_test("emit (webview_window)", webview_window, &rx);
+  }
+
+  fn run_emit_test<M: Manager<MockRuntime>>(kind: &str, m: M, rx: &Receiver<(&str, String)>) {
     let mut received = Vec::new();
     let payload = "global-payload";
-    app.emit(TEST_EVENT_NAME, payload).unwrap();
+    m.emit(TEST_EVENT_NAME, payload).unwrap();
     while let Ok((source, p)) = rx.recv_timeout(Duration::from_secs(1)) {
       assert_eq!(p, payload);
       received.push(source);
     }
     assert_events(
+      kind,
       &received,
       &[
+        APP_LISTEN_ID,
+        APP_LISTEN_ANY_ID,
         WINDOW_LISTEN_ID,
-        WINDOW_LISTEN_GLOBAL_ID,
-        APP_LISTEN_GLOBAL_ID,
+        WINDOW_LISTEN_ANY_ID,
+        WEBVIEW_LISTEN_ID,
+        WEBVIEW_LISTEN_ANY_ID,
+        WEBVIEW_WINDOW_LISTEN_ID,
+        WEBVIEW_WINDOW_LISTEN_ANY_ID,
       ],
     );
   }
 
   #[test]
-  fn window_global_events() {
-    let EventSetup {
-      app: _,
-      window,
-      tx: _,
-      rx,
-    } = setup_events();
-
-    let mut received = Vec::new();
-    let payload = "global-payload";
-    window.emit(TEST_EVENT_NAME, payload).unwrap();
-    while let Ok((source, p)) = rx.recv_timeout(Duration::from_secs(1)) {
-      assert_eq!(p, payload);
-      received.push(source);
-    }
-    assert_events(
-      &received,
-      &[
-        WINDOW_LISTEN_ID,
-        WINDOW_LISTEN_GLOBAL_ID,
-        APP_LISTEN_GLOBAL_ID,
-      ],
-    );
-  }
-
-  #[test]
-  fn window_local_events() {
+  fn emit_to() {
     let EventSetup {
       app,
       window,
+      webview,
+      webview_window,
       tx,
       rx,
-    } = setup_events();
+    } = setup_events(false);
 
+    run_emit_to_test(
+      "emit_to (App)",
+      &app,
+      &window,
+      &webview,
+      &webview_window,
+      tx.clone(),
+      &rx,
+    );
+    run_emit_to_test(
+      "emit_to (window)",
+      &window,
+      &window,
+      &webview,
+      &webview_window,
+      tx.clone(),
+      &rx,
+    );
+    run_emit_to_test(
+      "emit_to (webview)",
+      &webview,
+      &window,
+      &webview,
+      &webview_window,
+      tx.clone(),
+      &rx,
+    );
+    run_emit_to_test(
+      "emit_to (webview_window)",
+      &webview_window,
+      &window,
+      &webview,
+      &webview_window,
+      tx.clone(),
+      &rx,
+    );
+  }
+
+  fn run_emit_to_test<M: Manager<MockRuntime>>(
+    kind: &str,
+    m: &M,
+    window: &Window<MockRuntime>,
+    webview: &Webview<MockRuntime>,
+    webview_window: &WebviewWindow<MockRuntime>,
+    tx: Sender<(&'static str, String)>,
+    rx: &Receiver<(&'static str, String)>,
+  ) {
     let mut received = Vec::new();
     let payload = "global-payload";
-    window
-      .emit_to(window.label(), TEST_EVENT_NAME, payload)
-      .unwrap();
-    while let Ok((source, p)) = rx.recv_timeout(Duration::from_secs(1)) {
-      assert_eq!(p, payload);
-      received.push(source);
-    }
-    assert_events(&received, &[WINDOW_LISTEN_ID]);
 
-    received.clear();
-    let other_window_listen_id = "OtherWindow::listen";
-    let other_window = WindowBuilder::new(&app, "other", Default::default())
-      .build()
-      .unwrap();
-    other_window.listen(TEST_EVENT_NAME, move |evt| {
+    macro_rules! test_target {
+      ($target:expr, $id:ident) => {
+        m.emit_to($target, TEST_EVENT_NAME, payload).unwrap();
+        while let Ok((source, p)) = rx.recv_timeout(Duration::from_secs(1)) {
+          assert_eq!(p, payload);
+          received.push(source);
+        }
+        assert_events(kind, &received, &[$id]);
+
+        received.clear();
+      };
+    }
+
+    test_target!(EventTarget::App, APP_LISTEN_ID);
+    test_target!(window.label(), WINDOW_LISTEN_ID);
+    test_target!(webview.label(), WEBVIEW_LISTEN_ID);
+    test_target!(webview_window.label(), WEBVIEW_WINDOW_LISTEN_ID);
+
+    let other_webview_listen_id = "OtherWebview::listen";
+    let other_webview = WebviewWindowBuilder::new(
+      window,
+      kind.replace(['(', ')', ' '], ""),
+      Default::default(),
+    )
+    .build()
+    .unwrap();
+
+    other_webview.listen(TEST_EVENT_NAME, move |evt| {
       tx.send((
-        other_window_listen_id,
+        other_webview_listen_id,
         serde_json::from_str::<String>(evt.payload()).unwrap(),
       ))
       .unwrap();
     });
-    window
-      .emit_to(other_window.label(), TEST_EVENT_NAME, payload)
+    m.emit_to(other_webview.label(), TEST_EVENT_NAME, payload)
       .unwrap();
     while let Ok((source, p)) = rx.recv_timeout(Duration::from_secs(1)) {
       assert_eq!(p, payload);
       received.push(source);
     }
-    assert_events(&received, &[other_window_listen_id]);
+    assert_events("emit_to", &received, &[other_webview_listen_id]);
   }
 }

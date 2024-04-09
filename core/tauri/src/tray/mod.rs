@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -12,23 +12,12 @@ use crate::app::{GlobalMenuEventListener, GlobalTrayIconEventListener};
 use crate::menu::ContextMenu;
 use crate::menu::MenuEvent;
 use crate::resources::Resource;
-use crate::{run_main_thread, AppHandle, Icon, Manager, Runtime};
+use crate::{
+  image::Image, menu::run_item_main_thread, AppHandle, Manager, PhysicalPosition, Rect, Runtime,
+};
 use serde::Serialize;
 use std::path::Path;
 pub use tray_icon::TrayIconId;
-
-/// Describes a rectangle including position (x - y axis) and size.
-#[derive(Debug, PartialEq, Clone, Copy, Default, Serialize)]
-pub struct Rectangle {
-  /// The x-coordinate of the upper-left corner of the rectangle.
-  pub left: f64,
-  /// The y-coordinate of the upper-left corner of the rectangle.
-  pub top: f64,
-  /// The x-coordinate of the lower-right corner of the rectangle.
-  pub right: f64,
-  /// The y-coordinate of the lower-right corner of the rectangle.
-  pub bottom: f64,
-}
 
 /// Describes the click type that triggered this tray icon event.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
@@ -51,19 +40,17 @@ impl Default for ClickType {
 ///
 /// ## Platform-specific:
 ///
-/// - **Linux**: Unsupported. The event is not emmited even though the icon is shown,
+/// - **Linux**: Unsupported. The event is not emitted even though the icon is shown,
 /// the icon will still show a context menu on right click.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrayIconEvent {
   /// Id of the tray icon which triggered this event.
   pub id: TrayIconId,
-  /// Physical X Position of the click the triggered this event.
-  pub x: f64,
-  /// Physical Y Position of the click the triggered this event.
-  pub y: f64,
+  /// Physical Position of the click the triggered this event.
+  pub position: PhysicalPosition<f64>,
   /// Position and size of the tray icon
-  pub icon_rect: Rectangle,
+  pub icon_rect: Rect,
   /// The click type that triggered this event.
   pub click_type: ClickType,
 }
@@ -72,17 +59,6 @@ impl TrayIconEvent {
   /// Returns the id of the tray icon which triggered this event.
   pub fn id(&self) -> &TrayIconId {
     &self.id
-  }
-}
-
-impl From<tray_icon::Rectangle> for Rectangle {
-  fn from(value: tray_icon::Rectangle) -> Self {
-    Self {
-      bottom: value.bottom,
-      left: value.left,
-      top: value.top,
-      right: value.right,
-    }
   }
 }
 
@@ -100,9 +76,11 @@ impl From<tray_icon::TrayIconEvent> for TrayIconEvent {
   fn from(value: tray_icon::TrayIconEvent) -> Self {
     Self {
       id: value.id,
-      x: value.x,
-      y: value.y,
-      icon_rect: value.icon_rect.into(),
+      position: value.position,
+      icon_rect: Rect {
+        position: value.icon_rect.position.into(),
+        size: value.icon_rect.size.into(),
+      },
       click_type: value.click_type.into(),
     }
   }
@@ -159,7 +137,7 @@ impl<R: Runtime> TrayIconBuilder<R> {
   ///
   /// - **Linux:** Sometimes the icon won't be visible unless a menu is set.
   /// Setting an empty [`Menu`](crate::menu::Menu) is enough.
-  pub fn icon(mut self, icon: Icon) -> Self {
+  pub fn icon(mut self, icon: Image<'_>) -> Self {
     let icon = icon.try_into().ok();
     if let Some(icon) = icon {
       self.inner = self.inner.with_icon(icon);
@@ -364,9 +342,12 @@ impl<R: Runtime> TrayIcon<R> {
   }
 
   /// Sets a new tray icon. If `None` is provided, it will remove the icon.
-  pub fn set_icon(&self, icon: Option<Icon>) -> crate::Result<()> {
-    let icon = icon.and_then(|i| i.try_into().ok());
-    run_main_thread!(self, |self_: Self| self_.inner.set_icon(icon))?.map_err(Into::into)
+  pub fn set_icon(&self, icon: Option<Image<'_>>) -> crate::Result<()> {
+    let icon = match icon {
+      Some(i) => Some(i.try_into()?),
+      None => None,
+    };
+    run_item_main_thread!(self, |self_: Self| self_.inner.set_icon(icon))?.map_err(Into::into)
   }
 
   /// Sets a new tray menu.
@@ -375,7 +356,7 @@ impl<R: Runtime> TrayIcon<R> {
   ///
   /// - **Linux**: once a menu is set it cannot be removed so `None` has no effect
   pub fn set_menu<M: ContextMenu + 'static>(&self, menu: Option<M>) -> crate::Result<()> {
-    run_main_thread!(self, |self_: Self| self_
+    run_item_main_thread!(self, |self_: Self| self_
       .inner
       .set_menu(menu.map(|m| m.inner_context_owned())))
   }
@@ -387,7 +368,7 @@ impl<R: Runtime> TrayIcon<R> {
   /// - **Linux:** Unsupported
   pub fn set_tooltip<S: AsRef<str>>(&self, tooltip: Option<S>) -> crate::Result<()> {
     let s = tooltip.map(|s| s.as_ref().to_string());
-    run_main_thread!(self, |self_: Self| self_.inner.set_tooltip(s))?.map_err(Into::into)
+    run_item_main_thread!(self, |self_: Self| self_.inner.set_tooltip(s))?.map_err(Into::into)
   }
 
   /// Sets the title for this tray icon.
@@ -402,12 +383,12 @@ impl<R: Runtime> TrayIcon<R> {
   /// - **Windows:** Unsupported
   pub fn set_title<S: AsRef<str>>(&self, title: Option<S>) -> crate::Result<()> {
     let s = title.map(|s| s.as_ref().to_string());
-    run_main_thread!(self, |self_: Self| self_.inner.set_title(s))
+    run_item_main_thread!(self, |self_: Self| self_.inner.set_title(s))
   }
 
   /// Show or hide this tray icon.
   pub fn set_visible(&self, visible: bool) -> crate::Result<()> {
-    run_main_thread!(self, |self_: Self| self_.inner.set_visible(visible))?.map_err(Into::into)
+    run_item_main_thread!(self, |self_: Self| self_.inner.set_visible(visible))?.map_err(Into::into)
   }
 
   /// Sets the tray icon temp dir path. **Linux only**.
@@ -418,14 +399,14 @@ impl<R: Runtime> TrayIcon<R> {
     #[allow(unused)]
     let p = path.map(|p| p.as_ref().to_path_buf());
     #[cfg(target_os = "linux")]
-    run_main_thread!(self, |self_: Self| self_.inner.set_temp_dir_path(p))?;
+    run_item_main_thread!(self, |self_: Self| self_.inner.set_temp_dir_path(p))?;
     Ok(())
   }
 
   /// Sets the current icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc). **macOS only**.
   pub fn set_icon_as_template(&self, #[allow(unused)] is_template: bool) -> crate::Result<()> {
     #[cfg(target_os = "macos")]
-    run_main_thread!(self, |self_: Self| self_
+    run_item_main_thread!(self, |self_: Self| self_
       .inner
       .set_icon_as_template(is_template))?;
     Ok(())
@@ -434,19 +415,10 @@ impl<R: Runtime> TrayIcon<R> {
   /// Disable or enable showing the tray menu on left click. **macOS only**.
   pub fn set_show_menu_on_left_click(&self, #[allow(unused)] enable: bool) -> crate::Result<()> {
     #[cfg(target_os = "macos")]
-    run_main_thread!(self, |self_: Self| self_
+    run_item_main_thread!(self, |self_: Self| self_
       .inner
       .set_show_menu_on_left_click(enable))?;
     Ok(())
-  }
-}
-
-impl TryFrom<Icon> for tray_icon::Icon {
-  type Error = crate::Error;
-
-  fn try_from(value: Icon) -> Result<Self, Self::Error> {
-    let value: crate::runtime::Icon = value.try_into()?;
-    tray_icon::Icon::from_rgba(value.rgba, value.width, value.height).map_err(Into::into)
   }
 }
 

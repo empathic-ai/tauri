@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -30,17 +30,16 @@
 //!     // Use `tauri::Builder::default()` to use the default runtime rather than the `MockRuntime`;
 //!     // let app = create_app(tauri::Builder::default());
 //!     let app = create_app(mock_builder());
-//!     let window = tauri::WindowBuilder::new(&app, "main", Default::default())
-//!         .build()
-//!         .unwrap();
+//!     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
 //!
 //!     // run the `ping` command and assert it returns `pong`
 //!     let res = tauri::test::get_ipc_response(
-//!         &window,
-//!         tauri::window::InvokeRequest {
+//!         &webview,
+//!         tauri::webview::InvokeRequest {
 //!             cmd: "ping".into(),
 //!             callback: tauri::ipc::CallbackFn(0),
 //!             error: tauri::ipc::CallbackFn(1),
+//!             url: "http://tauri.localhost".parse().unwrap(),
 //!             body: tauri::ipc::InvokeBody::default(),
 //!             headers: Default::default(),
 //!         },
@@ -57,28 +56,29 @@ use serde::Serialize;
 use std::{borrow::Cow, collections::HashMap, fmt::Debug};
 
 use crate::{
-  ipc::{InvokeBody, InvokeError, InvokeResponse},
-  window::InvokeRequest,
-  App, Builder, Context, Pattern, Window,
+  ipc::{InvokeBody, InvokeError, InvokeResponse, RuntimeAuthority},
+  webview::InvokeRequest,
+  App, Assets, Builder, Context, Pattern, Runtime, Webview,
 };
 use tauri_utils::{
-  assets::{AssetKey, Assets, CspHash},
-  config::{Config, PatternKind, TauriConfig},
+  acl::resolved::Resolved,
+  assets::{AssetKey, CspHash},
+  config::{AppConfig, Config},
 };
 
 /// An empty [`Assets`] implementation.
 pub struct NoopAsset {
-  assets: HashMap<&'static str, &'static [u8]>,
+  assets: HashMap<String, Vec<u8>>,
   csp_hashes: Vec<CspHash<'static>>,
 }
 
-impl Assets for NoopAsset {
+impl<R: Runtime> Assets<R> for NoopAsset {
   fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
     None
   }
 
-  fn iter(&self) -> Box<dyn Iterator<Item = (&&str, &&[u8])> + '_> {
-    Box::new(self.assets.iter())
+  fn iter(&self) -> Box<dyn Iterator<Item = (&str, &[u8])> + '_> {
+    Box::new(self.assets.iter().map(|(k, b)| (k.as_str(), b.as_slice())))
   }
 
   fn csp_hashes(&self, html_path: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
@@ -95,19 +95,21 @@ pub fn noop_assets() -> NoopAsset {
 }
 
 /// Creates a new [`crate::Context`] for testing.
-pub fn mock_context<A: Assets>(assets: A) -> crate::Context<A> {
+pub fn mock_context<R: Runtime, A: Assets<R>>(assets: A) -> crate::Context<R> {
   Context {
     config: Config {
       schema: None,
-      package: Default::default(),
-      tauri: TauriConfig {
-        pattern: PatternKind::Brownfield,
+      product_name: Default::default(),
+      version: Default::default(),
+      identifier: Default::default(),
+      app: AppConfig {
+        with_global_tauri: Default::default(),
         windows: Vec::new(),
-        bundle: Default::default(),
         security: Default::default(),
         tray_icon: None,
         macos_private_api: false,
       },
+      bundle: Default::default(),
       build: Default::default(),
       plugins: Default::default(),
     },
@@ -124,7 +126,9 @@ pub fn mock_context<A: Assets>(assets: A) -> crate::Context<A> {
       crate_name: "test",
     },
     _info_plist: (),
-    pattern: Pattern::Brownfield(std::marker::PhantomData),
+    pattern: Pattern::Brownfield,
+    runtime_authority: RuntimeAuthority::new(Default::default(), Resolved::default()),
+    plugin_global_api_scripts: None,
   }
 }
 
@@ -174,17 +178,16 @@ pub fn mock_app() -> App<MockRuntime> {
 ///
 /// fn main() {
 ///     let app = create_app(mock_builder());
-///     let window = tauri::WindowBuilder::new(&app, "main", Default::default())
-///         .build()
-///         .unwrap();
+///     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
 ///
 ///     // run the `ping` command and assert it returns `pong`
 ///     tauri::test::assert_ipc_response(
-///         &window,
-///         tauri::window::InvokeRequest {
+///         &webview,
+///         tauri::webview::InvokeRequest {
 ///             cmd: "ping".into(),
 ///             callback: tauri::ipc::CallbackFn(0),
 ///             error: tauri::ipc::CallbackFn(1),
+///             url: "http://tauri.localhost".parse().unwrap(),
 ///             body: tauri::ipc::InvokeBody::default(),
 ///             headers: Default::default(),
 ///         },
@@ -192,13 +195,16 @@ pub fn mock_app() -> App<MockRuntime> {
 ///     );
 /// }
 /// ```
-pub fn assert_ipc_response<T: Serialize + Debug + Send + Sync + 'static>(
-  window: &Window<MockRuntime>,
+pub fn assert_ipc_response<
+  T: Serialize + Debug + Send + Sync + 'static,
+  W: AsRef<Webview<MockRuntime>>,
+>(
+  webview: &W,
   request: InvokeRequest,
   expected: Result<T, T>,
 ) {
   let response =
-    get_ipc_response(window, request).map(|b| b.deserialize::<serde_json::Value>().unwrap());
+    get_ipc_response(webview, request).map(|b| b.deserialize::<serde_json::Value>().unwrap());
   assert_eq!(
     response,
     expected
@@ -229,17 +235,16 @@ pub fn assert_ipc_response<T: Serialize + Debug + Send + Sync + 'static>(
 ///
 /// fn main() {
 ///     let app = create_app(mock_builder());
-///     let window = tauri::WindowBuilder::new(&app, "main", Default::default())
-///         .build()
-///         .unwrap();
+///     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
 ///
 ///     // run the `ping` command and assert it returns `pong`
 ///     let res = tauri::test::get_ipc_response(
-///         &window,
-///         tauri::window::InvokeRequest {
+///         &webview,
+///         tauri::webview::InvokeRequest {
 ///             cmd: "ping".into(),
 ///             callback: tauri::ipc::CallbackFn(0),
 ///             error: tauri::ipc::CallbackFn(1),
+///             url: "http://tauri.localhost".parse().unwrap(),
 ///             body: tauri::ipc::InvokeBody::default(),
 ///             headers: Default::default(),
 ///         },
@@ -248,12 +253,12 @@ pub fn assert_ipc_response<T: Serialize + Debug + Send + Sync + 'static>(
 ///     assert_eq!(res.unwrap().deserialize::<String>().unwrap(), String::from("pong"));
 /// }
 ///```
-pub fn get_ipc_response(
-  window: &Window<MockRuntime>,
+pub fn get_ipc_response<W: AsRef<Webview<MockRuntime>>>(
+  webview: &W,
   request: InvokeRequest,
 ) -> Result<InvokeBody, serde_json::Value> {
   let (tx, rx) = std::sync::mpsc::sync_channel(1);
-  window.clone().on_message(
+  webview.as_ref().clone().on_message(
     request,
     Box::new(move |_window, _cmd, response, _callback, _error| {
       tx.send(response).unwrap();
@@ -269,7 +274,6 @@ pub fn get_ipc_response(
 
 #[cfg(test)]
 mod tests {
-  use crate::WindowBuilder;
   use std::time::Duration;
 
   use super::mock_app;
@@ -278,7 +282,7 @@ mod tests {
   fn run_app() {
     let app = mock_app();
 
-    let w = WindowBuilder::new(&app, "main", Default::default())
+    let w = crate::WebviewWindowBuilder::new(&app, "main", Default::default())
       .build()
       .unwrap();
 

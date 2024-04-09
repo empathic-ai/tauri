@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -82,7 +82,7 @@ export class Menu extends MenuItemBase {
 
   /** Create a default menu. */
   static async default(): Promise<Menu> {
-    return invoke<[number, string]>('plugin:menu|default').then(
+    return invoke<[number, string]>('plugin:menu|create_default').then(
       ([rid, id]) => new Menu(rid, id)
     )
   }

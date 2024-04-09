@@ -1,4 +1,4 @@
-// Copyright 2019-2023 Tauri Programme within The Commons Conservancy
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
@@ -147,7 +147,12 @@ export function mockWindows(
   mockInternals()
   window.__TAURI_INTERNALS__.metadata = {
     windows: [current, ...additionalWindows].map((label) => ({ label })),
-    currentWindow: { label: current }
+    currentWindow: { label: current },
+    webviews: [current, ...additionalWindows].map((label) => ({
+      windowLabel: label,
+      label
+    })),
+    currentWebview: { windowLabel: current, label: current }
   }
 }
 

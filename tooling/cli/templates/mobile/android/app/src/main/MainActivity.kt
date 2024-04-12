@@ -3,8 +3,8 @@ package {{reverse-domain app.domain}}.{{snake-case app.name}}
 class MainActivity : TauriActivity() {
   override fun onStart() {
     super.onStart()
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-      WebView.setWebContentsDebuggingEnabled(true);
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+      android.webkit.WebView.setWebContentsDebuggingEnabled(true);
     }
   }
 }

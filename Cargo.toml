@@ -43,3 +43,6 @@ codegen-units = 1
 lto = true
 incremental = false
 opt-level = "s"
+
+[patch.crates-io]
+cargo-mobile2 = { git = "https://github.com/empathic-ai/cargo-mobile2.git" }

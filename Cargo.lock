@@ -4911,3 +4911,8 @@ name = "zeroize"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "525b4ec142c6b68a2d10f01f7bbf6755599ca3f81ea53b8431b7dd348f5fdb2d"
+
+[[patch.unused]]
+name = "cargo-mobile2"
+version = "0.9.1"
+source = "git+https://github.com/empathic-ai/cargo-mobile2.git#8dfbd761559977fe10ff67d44ca44b0586222eb3"

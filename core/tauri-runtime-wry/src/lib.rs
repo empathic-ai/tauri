@@ -345,14 +345,11 @@ pub struct ActiveTraceSpanStore(Rc<RefCell<Vec<ActiveTracingSpan>>>);
 
 #[cfg(feature = "tracing")]
 impl ActiveTraceSpanStore {
-  pub fn remove_window_draw(&self, window_id: TaoWindowId) {
-    let mut store = self.0.borrow_mut();
-    if let Some(index) = store
-      .iter()
-      .position(|t| matches!(t, ActiveTracingSpan::WindowDraw { id, span: _ } if id == &window_id))
-    {
-      store.remove(index);
-    }
+  pub fn remove_window_draw(&self) {
+    self
+      .0
+      .borrow_mut()
+      .retain(|t| !matches!(t, ActiveTracingSpan::WindowDraw { id: _, span: _ }));
   }
 }
 
@@ -772,6 +769,9 @@ impl WindowBuilder for WindowBuilderWrapper {
         .content_protected(config.content_protected)
         .skip_taskbar(config.skip_taskbar)
         .theme(config.theme)
+        .closable(config.closable)
+        .maximizable(config.maximizable)
+        .minimizable(config.minimizable)
         .shadow(config.shadow);
 
       if let (Some(min_width), Some(min_height)) = (config.min_width, config.min_height) {
@@ -1092,6 +1092,7 @@ pub enum WindowMessage {
   Title(Sender<String>),
   CurrentMonitor(Sender<Option<MonitorHandle>>),
   PrimaryMonitor(Sender<Option<MonitorHandle>>),
+  MonitorFromPoint(Sender<Option<MonitorHandle>>, (f64, f64)),
   AvailableMonitors(Sender<Vec<MonitorHandle>>),
   #[cfg(any(
     target_os = "linux",
@@ -1187,7 +1188,7 @@ pub enum WebviewMessage {
   SetAutoResize(bool),
   SetZoom(f64),
   // Getters
-  Url(Sender<Result<Url>>),
+  Url(Sender<Result<String>>),
   Bounds(Sender<Result<tauri_runtime::Rect>>),
   Position(Sender<Result<PhysicalPosition<i32>>>),
   Size(Sender<Result<PhysicalSize<u32>>>),
@@ -1302,7 +1303,7 @@ impl<T: UserEvent> WebviewDispatch<T> for WryWebviewDispatcher<T> {
 
   // Getters
 
-  fn url(&self) -> Result<Url> {
+  fn url(&self) -> Result<String> {
     webview_getter!(self, WebviewMessage::Url)?
   }
 
@@ -1576,6 +1577,21 @@ impl<T: UserEvent> WindowDispatch<T> for WryWindowDispatcher<T> {
 
   fn primary_monitor(&self) -> Result<Option<Monitor>> {
     Ok(window_getter!(self, WindowMessage::PrimaryMonitor)?.map(|m| MonitorHandleWrapper(m).into()))
+  }
+
+  fn monitor_from_point(&self, x: f64, y: f64) -> Result<Option<Monitor>> {
+    let (tx, rx) = channel();
+
+    let _ = send_user_message(
+      &self.context,
+      Message::Window(self.window_id, WindowMessage::MonitorFromPoint(tx, (x, y))),
+    );
+
+    Ok(
+      rx.recv()
+        .map_err(|_| crate::Error::FailedToReceiveMessage)?
+        .map(|m| MonitorHandleWrapper(m).into()),
+    )
   }
 
   fn available_monitors(&self) -> Result<Vec<Monitor>> {
@@ -2149,6 +2165,15 @@ impl<T: UserEvent> RuntimeHandle<T> for WryHandle<T> {
       .map(|m| MonitorHandleWrapper(m).into())
   }
 
+  fn monitor_from_point(&self, x: f64, y: f64) -> Option<Monitor> {
+    self
+      .context
+      .main_thread
+      .window_target
+      .monitor_from_point(x, y)
+      .map(|m| MonitorHandleWrapper(m).into())
+  }
+
   fn available_monitors(&self) -> Vec<Monitor> {
     self
       .context
@@ -2157,6 +2182,17 @@ impl<T: UserEvent> RuntimeHandle<T> for WryHandle<T> {
       .available_monitors()
       .map(|m| MonitorHandleWrapper(m).into())
       .collect()
+  }
+
+  fn cursor_position(&self) -> Result<PhysicalPosition<f64>> {
+    self
+      .context
+      .main_thread
+      .window_target
+      .cursor_position()
+      .map(PhysicalPositionWrapper)
+      .map(Into::into)
+      .map_err(|_| Error::FailedToGetCursorPosition)
   }
 
   #[cfg(target_os = "macos")]
@@ -2396,6 +2432,15 @@ impl<T: UserEvent> Runtime<T> for Wry<T> {
       .map(|m| MonitorHandleWrapper(m).into())
   }
 
+  fn monitor_from_point(&self, x: f64, y: f64) -> Option<Monitor> {
+    self
+      .context
+      .main_thread
+      .window_target
+      .monitor_from_point(x, y)
+      .map(|m| MonitorHandleWrapper(m).into())
+  }
+
   fn available_monitors(&self) -> Vec<Monitor> {
     self
       .context
@@ -2404,6 +2449,17 @@ impl<T: UserEvent> Runtime<T> for Wry<T> {
       .available_monitors()
       .map(|m| MonitorHandleWrapper(m).into())
       .collect()
+  }
+
+  fn cursor_position(&self) -> Result<PhysicalPosition<f64>> {
+    self
+      .context
+      .main_thread
+      .window_target
+      .cursor_position()
+      .map(PhysicalPositionWrapper)
+      .map(Into::into)
+      .map_err(|_| Error::FailedToGetCursorPosition)
   }
 
   #[cfg(target_os = "macos")]
@@ -2621,6 +2677,9 @@ fn handle_user_message<T: UserEvent>(
           WindowMessage::Title(tx) => tx.send(window.title()).unwrap(),
           WindowMessage::CurrentMonitor(tx) => tx.send(window.current_monitor()).unwrap(),
           WindowMessage::PrimaryMonitor(tx) => tx.send(window.primary_monitor()).unwrap(),
+          WindowMessage::MonitorFromPoint(tx, (x, y)) => {
+            tx.send(window.monitor_from_point(x, y)).unwrap()
+          }
           WindowMessage::AvailableMonitors(tx) => {
             tx.send(window.available_monitors().collect()).unwrap()
           }
@@ -2699,16 +2758,8 @@ fn handle_user_message<T: UserEvent>(
           WindowMessage::Unmaximize => window.set_maximized(false),
           WindowMessage::Minimize => window.set_minimized(true),
           WindowMessage::Unminimize => window.set_minimized(false),
-          WindowMessage::Show => {
-            window.set_visible(true);
-            #[cfg(windows)]
-            let _ = set_webview_visibility(&webviews, !window.is_minimized());
-          }
-          WindowMessage::Hide => {
-            window.set_visible(false);
-            #[cfg(windows)]
-            let _ = set_webview_visibility(&webviews, false);
-          }
+          WindowMessage::Show => window.set_visible(true),
+          WindowMessage::Hide => window.set_visible(false),
           WindowMessage::Close => {
             panic!("cannot handle `WindowMessage::Close` on the main thread")
           }
@@ -3225,9 +3276,8 @@ fn handle_event_loop<T: UserEvent>(
       callback(RunEvent::Exit);
     }
 
-    #[cfg(any(feature = "tracing", windows))]
+    #[cfg(windows)]
     Event::RedrawRequested(id) => {
-      #[cfg(windows)]
       if let Some(window_id) = window_id_map.get(&id) {
         let mut windows_ref = windows.0.borrow_mut();
         if let Some(window) = windows_ref.get_mut(&window_id) {
@@ -3240,9 +3290,11 @@ fn handle_event_loop<T: UserEvent>(
           }
         }
       }
+    }
 
-      #[cfg(feature = "tracing")]
-      active_tracing_spans.remove_window_draw(id);
+    #[cfg(feature = "tracing")]
+    Event::RedrawEventsCleared => {
+      active_tracing_spans.remove_window_draw();
     }
 
     Event::UserEvent(Message::Webview(
@@ -3369,7 +3421,7 @@ fn handle_event_loop<T: UserEvent>(
               .map(|w| (w.inner.clone(), w.webviews.clone()))
             {
               let size = size.to_logical::<f32>(window.scale_factor());
-              for webview in &webviews {
+              for webview in webviews {
                 if let Some(b) = &*webview.bounds.lock().unwrap() {
                   if let Err(e) = webview.set_bounds(wry::Rect {
                     position: LogicalPosition::new(size.width * b.x_rate, size.height * b.y_rate)
@@ -3381,9 +3433,6 @@ fn handle_event_loop<T: UserEvent>(
                   }
                 }
               }
-              #[cfg(windows)]
-              let _ =
-                set_webview_visibility(&webviews, window.is_visible() && !window.is_minimized());
             }
           }
           _ => {}
@@ -3427,6 +3476,13 @@ fn handle_event_loop<T: UserEvent>(
     Event::Opened { urls } => {
       callback(RunEvent::Opened { urls });
     }
+    #[cfg(target_os = "macos")]
+    Event::Reopen {
+      has_visible_windows,
+      ..
+    } => callback(RunEvent::Reopen {
+      has_visible_windows,
+    }),
     _ => (),
   }
 }
@@ -4093,7 +4149,7 @@ fn inner_size(
   webviews: &[WebviewWrapper],
   has_children: bool,
 ) -> TaoPhysicalSize<u32> {
-  if !has_children {
+  if !has_children && !webviews.is_empty() {
     use wry::WebViewExtMacOS;
     let webview = webviews.first().unwrap();
     let view_frame = unsafe { cocoa::appkit::NSView::frame(webview.webview()) };
@@ -4122,8 +4178,10 @@ fn calculate_window_center_position(
   {
     use tao::platform::windows::MonitorHandleExtWindows;
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
-    let mut monitor_info = MONITORINFO::default();
-    monitor_info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    let mut monitor_info = MONITORINFO {
+      cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+      ..Default::default()
+    };
     let status = unsafe { GetMonitorInfoW(HMONITOR(target_monitor.hmonitor()), &mut monitor_info) };
     if status.into() {
       let available_width = monitor_info.rcWork.right - monitor_info.rcWork.left;
@@ -4155,16 +4213,4 @@ fn clear_window_surface(
     buffer.fill(0);
     let _ = buffer.present();
   }
-}
-
-#[cfg(windows)]
-fn set_webview_visibility(
-  webviews: &[WebviewWrapper],
-  is_visible: bool,
-) -> windows::core::Result<()> {
-  for webview in webviews {
-    let controller = webview.controller();
-    unsafe { controller.SetIsVisible(is_visible) }?;
-  }
-  Ok(())
 }

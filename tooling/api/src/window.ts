@@ -673,7 +673,7 @@ class Window {
   }
 
   /**
-   * Gets the window’s native maximize button state.
+   * Gets the window's native maximize button state.
    *
    * #### Platform-specific
    *
@@ -694,7 +694,7 @@ class Window {
   }
 
   /**
-   * Gets the window’s native minimize button state.
+   * Gets the window's native minimize button state.
    *
    * #### Platform-specific
    *
@@ -715,7 +715,7 @@ class Window {
   }
 
   /**
-   * Gets the window’s native close button state.
+   * Gets the window's native close button state.
    *
    * #### Platform-specific
    *
@@ -1227,15 +1227,15 @@ class Window {
       )
     }
 
+    const value = {} as Record<string, unknown>
+    value[`${size.type}`] = {
+      width: size.width,
+      height: size.height
+    }
+
     return invoke('plugin:window|set_size', {
       label: this.label,
-      value: {
-        type: size.type,
-        data: {
-          width: size.width,
-          height: size.height
-        }
-      }
+      value
     })
   }
 
@@ -1259,17 +1259,18 @@ class Window {
       )
     }
 
+    let value = null as Record<string, unknown> | null
+    if (size) {
+      value = {}
+      value[`${size.type}`] = {
+        width: size.width,
+        height: size.height
+      }
+    }
+
     return invoke('plugin:window|set_min_size', {
       label: this.label,
-      value: size
-        ? {
-            type: size.type,
-            data: {
-              width: size.width,
-              height: size.height
-            }
-          }
-        : null
+      value
     })
   }
 
@@ -1293,17 +1294,18 @@ class Window {
       )
     }
 
+    let value = null as Record<string, unknown> | null
+    if (size) {
+      value = {}
+      value[`${size.type}`] = {
+        width: size.width,
+        height: size.height
+      }
+    }
+
     return invoke('plugin:window|set_max_size', {
       label: this.label,
-      value: size
-        ? {
-            type: size.type,
-            data: {
-              width: size.width,
-              height: size.height
-            }
-          }
-        : null
+      value
     })
   }
 
@@ -1330,15 +1332,15 @@ class Window {
       )
     }
 
+    const value = {} as Record<string, unknown>
+    value[`${position.type}`] = {
+      x: position.x,
+      y: position.y
+    }
+
     return invoke('plugin:window|set_position', {
       label: this.label,
-      value: {
-        type: position.type,
-        data: {
-          x: position.x,
-          y: position.y
-        }
-      }
+      value
     })
   }
 
@@ -1516,15 +1518,15 @@ class Window {
       )
     }
 
+    const value = {} as Record<string, unknown>
+    value[`${position.type}`] = {
+      x: position.x,
+      y: position.y
+    }
+
     return invoke('plugin:window|set_cursor_position', {
       label: this.label,
-      value: {
-        type: position.type,
-        data: {
-          x: position.x,
-          y: position.y
-        }
-      }
+      value
     })
   }
 
@@ -2239,6 +2241,23 @@ async function primaryMonitor(): Promise<Monitor | null> {
 }
 
 /**
+ * Returns the monitor that contains the given point. Returns `null` if can't find any.
+ * @example
+ * ```typescript
+ * import { monitorFromPoint } from '@tauri-apps/api/window';
+ * const monitor = monitorFromPoint();
+ * ```
+ *
+ * @since 1.0.0
+ */
+async function monitorFromPoint(x: number, y: number): Promise<Monitor | null> {
+  return invoke<Monitor | null>('plugin:window|monitor_from_point', {
+    x,
+    y
+  }).then(mapMonitor)
+}
+
+/**
  * Returns the list of all the monitors available on the system.
  * @example
  * ```typescript
@@ -2251,6 +2270,22 @@ async function primaryMonitor(): Promise<Monitor | null> {
 async function availableMonitors(): Promise<Monitor[]> {
   return invoke<Monitor[]>('plugin:window|available_monitors').then(
     (ms) => ms.map(mapMonitor) as Monitor[]
+  )
+}
+
+/**
+ * Get the cursor position relative to the top-left hand corner of the desktop.
+ *
+ * Note that the top-left hand corner of the desktop is not necessarily the same as the screen.
+ * If the user uses a desktop with multiple monitors,
+ * the top-left hand corner of the desktop is the top-left hand corner of the main monitor on Windows and macOS
+ * or the top-left of the leftmost monitor on X11.
+ *
+ * The coordinates can be negative if the top-left hand corner of the window is outside of the visible screen region.
+ */
+async function cursorPosition(): Promise<PhysicalPosition> {
+  return invoke<PhysicalPosition>('plugin:window|cursor_position').then(
+    mapPhysicalPosition
   )
 }
 
@@ -2267,8 +2302,10 @@ export {
   Effect,
   EffectState,
   currentMonitor,
+  monitorFromPoint,
   primaryMonitor,
-  availableMonitors
+  availableMonitors,
+  cursorPosition
 }
 
 export type {

@@ -235,6 +235,10 @@ impl<T: UserEvent> RuntimeHandle<T> for MockRuntimeHandle {
     unimplemented!()
   }
 
+  fn monitor_from_point(&self, x: f64, y: f64) -> Option<Monitor> {
+    unimplemented!()
+  }
+
   fn available_monitors(&self) -> Vec<Monitor> {
     unimplemented!()
   }
@@ -267,6 +271,10 @@ impl<T: UserEvent> RuntimeHandle<T> for MockRuntimeHandle {
     F: FnOnce(&mut jni::JNIEnv, &jni::objects::JObject, &jni::objects::JObject) + Send + 'static,
   {
     todo!()
+  }
+
+  fn cursor_position(&self) -> Result<PhysicalPosition<f64>> {
+    Ok(PhysicalPosition::new(0.0, 0.0))
   }
 }
 
@@ -498,13 +506,8 @@ impl<T: UserEvent> WebviewDispatch<T> for MockWebviewDispatcher {
     Ok(())
   }
 
-  fn url(&self) -> Result<url::Url> {
-    self
-      .url
-      .lock()
-      .unwrap()
-      .parse()
-      .map_err(|_| Error::FailedToReceiveMessage)
+  fn url(&self) -> Result<String> {
+    Ok(self.url.lock().unwrap().clone())
   }
 
   fn bounds(&self) -> Result<tauri_runtime::Rect> {
@@ -648,6 +651,10 @@ impl<T: UserEvent> WindowDispatch<T> for MockWindowDispatcher {
   }
 
   fn primary_monitor(&self) -> Result<Option<Monitor>> {
+    Ok(None)
+  }
+
+  fn monitor_from_point(&self, x: f64, y: f64) -> Result<Option<Monitor>> {
     Ok(None)
   }
 
@@ -1055,6 +1062,10 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
     unimplemented!()
   }
 
+  fn monitor_from_point(&self, x: f64, y: f64) -> Option<Monitor> {
+    unimplemented!()
+  }
+
   fn available_monitors(&self) -> Vec<Monitor> {
     unimplemented!()
   }
@@ -1151,5 +1162,9 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
     }
 
     callback(RunEvent::Exit);
+  }
+
+  fn cursor_position(&self) -> Result<PhysicalPosition<f64>> {
+    Ok(PhysicalPosition::new(0.0, 0.0))
   }
 }

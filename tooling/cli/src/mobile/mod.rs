@@ -305,7 +305,12 @@ pub fn get_app(config: &TauriConfig, interface: &AppInterface) -> App {
     domain.pop();
   }
 
+  println!("APP NAMEEEEEE PRIOR: {}", app_name);
+
   let app_name = interface.app_settings().app_name().unwrap_or(app_name);
+
+  println!("APP NAMEEEEEE: {}", app_name);
+
   let lib_name = interface
     .app_settings()
     .lib_name()

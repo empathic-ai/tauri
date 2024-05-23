@@ -305,13 +305,14 @@ pub fn get_app(config: &TauriConfig, interface: &AppInterface) -> App {
     domain.pop();
   }
 
-  // Commented out--prefer names not bound to Rust package name
-  //let app_name = interface.app_settings().app_name().unwrap_or(app_name);
+  // Added in--prefer names not bound to Rust package name
+  let simple_app_name = app_name.clone();
+  let app_name = interface.app_settings().app_name().unwrap_or(app_name);
 
   let lib_name = interface
     .app_settings()
     .lib_name()
-    .unwrap_or_else(|| app_name.to_snek_case());
+    .unwrap_or_else(|| simple_app_name.to_snek_case());
 
   let raw = RawAppConfig {
     name: app_name,

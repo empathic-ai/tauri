@@ -133,9 +133,10 @@ pub fn get_config(
     ..Default::default()
   };
 
+  //app.name_snake()
   set_var(
     "WRY_ANDROID_PACKAGE",
-    format!("{}.{}", app.reverse_domain(), app.name_snake()),
+    format!("{}.{}", app.reverse_domain(), app.lib_name()),
   );
   set_var("WRY_ANDROID_LIBRARY", app.lib_name());
   set_var("TAURI_ANDROID_PROJECT_PATH", config.project_dir());
@@ -143,7 +144,8 @@ pub fn get_config(
   let src_main_dir = config.project_dir().join("app/src/main").join(format!(
     "java/{}/{}",
     app.reverse_domain().replace('.', "/"),
-    app.name_snake()
+    app.lib_name()
+    //app.name_snake()
   ));
   if config.project_dir().exists() {
     if src_main_dir.exists() {

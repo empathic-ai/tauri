@@ -387,7 +387,7 @@ pub fn setup(
       let mut i = 0;
       let sleep_interval = std::time::Duration::from_secs(2);
       let timeout_duration = std::time::Duration::from_secs(1);
-      let max_attempts = 900;
+      let max_attempts = 90;
       'waiting: loop {
         for addr in addrs.iter() {
           if std::net::TcpStream::connect_timeout(addr, timeout_duration).is_ok() {

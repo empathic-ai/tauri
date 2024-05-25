@@ -138,7 +138,7 @@ pub fn get_config(
     "WRY_ANDROID_PACKAGE",
     format!("{}.{}", app.reverse_domain(), app.lib_name()),
   );
-  set_var("WRY_ANDROID_LIBRARY", app.name_snake());
+  set_var("WRY_ANDROID_LIBRARY", app.lib_name());
   set_var("TAURI_ANDROID_PROJECT_PATH", config.project_dir());
 
   let src_main_dir = config.project_dir().join("app/src/main").join(format!(

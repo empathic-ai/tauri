@@ -38,24 +38,12 @@ pub fn entry_point(_attributes: TokenStream, item: TokenStream) -> TokenStream {
 
   let mut error = None;
   let domain = get_env_var("TAURI_ANDROID_PACKAGE_PREFIX", |r| r, &mut error, &function);
-
   let app_name = get_env_var(
     "CARGO_PKG_NAME",
     |r| r.replace('-', "_"),
     &mut error,
     &function,
   );
-
-  println!("PACKAGE NAME: {}", app_name);
-
-  let app_name = get_env_var(
-    "CARGO_CRATE_NAME",
-    |r| r.replace('-', "_"),
-    &mut error,
-    &function,
-  );
-
-  println!("CRATE NAME: {}", app_name);
 
   if let Some(e) = error {
     quote!(#e).into()

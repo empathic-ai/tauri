@@ -314,8 +314,6 @@ pub fn get_app(config: &TauriConfig, interface: &AppInterface) -> App {
     .lib_name()
     .unwrap_or_else(|| simple_app_name.to_snek_case());
 
-  println!("LIB NAME: {}", lib_name);
-
   let raw = RawAppConfig {
     name: app_name,
     lib_name: Some(lib_name),

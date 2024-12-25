@@ -52,11 +52,6 @@ codegen-units = 1
 lto = true
 incremental = false
 opt-level = "s"
-<<<<<<< HEAD
-
-[patch.crates-io]
-cargo-mobile2 = { git = "https://github.com/empathic-ai/cargo-mobile2.git" }
-=======
 strip = true
 
 # profiles for tauri-cli
@@ -75,4 +70,4 @@ opt-level = "s"
 [patch.crates-io]
 schemars_derive = { git = 'https://github.com/tauri-apps/schemars.git', branch = 'feat/preserve-description-newlines' }
 tauri = { path = "./crates/tauri" }
->>>>>>> upstream/dev
+cargo-mobile2 = { git = "https://github.com/empathic-ai/cargo-mobile2.git" }
